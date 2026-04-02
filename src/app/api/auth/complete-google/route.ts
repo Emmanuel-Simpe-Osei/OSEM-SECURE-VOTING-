@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
 
   if (voter.has_voted) {
     return NextResponse.redirect(
-      new URL(`/election/${slug}/already-voted`, request.url),
+      new URL(`/election/${slug}/login?error=already_voted`, request.url),
     );
   }
 

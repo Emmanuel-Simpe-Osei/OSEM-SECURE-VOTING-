@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-function getSessionCookie(
-  request: NextRequest,
-  cookieName: string,
-): string | undefined {
-  return request.cookies.get(cookieName)?.value;
-}
-
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ── Admin route protection ───────────────────────────────────────
   if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
-    const adminCookie = getSessionCookie(request, "osem_admin_session");
-
-    if (!adminCookie) {
-      return NextResponse.redirect(new URL("/admin/login", request.url));
+    const adminCookie = request.cookies.get("osem_admin_session");
+    if (!adminCookie?.value) {
+      return NextResponse.redirect(
+        new URL("/admin/login?error=unauthorized", request.url),
+      );
     }
   }
 
@@ -26,13 +20,11 @@ export async function middleware(request: NextRequest) {
     pathname.includes("/success");
 
   if (isProtectedStudentRoute) {
-    const studentCookie = getSessionCookie(request, "osem_vote_session");
-
-    if (!studentCookie) {
+    const studentCookie = request.cookies.get("osem_vote_session");
+    if (!studentCookie?.value) {
       const parts = pathname.split("/");
       const slugIndex = parts.indexOf("election") + 1;
       const slug = parts[slugIndex];
-
       return NextResponse.redirect(
         new URL(`/election/${slug}/login`, request.url),
       );

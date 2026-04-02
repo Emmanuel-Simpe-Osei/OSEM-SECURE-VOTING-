@@ -35,7 +35,8 @@ export interface AdminSession {
   session_id: string;
 }
 
-const sessionOptions: SessionOptions = {
+// ── Student session ───────────────────────────────────────────────
+const studentSessionOptions: SessionOptions = {
   password: sessionSecret,
   cookieName: "osem_vote_session",
   cookieOptions: {
@@ -46,10 +47,22 @@ const sessionOptions: SessionOptions = {
   },
 };
 
+// ── Admin session — separate cookie ──────────────────────────────
+const adminSessionOptions: SessionOptions = {
+  password: sessionSecret,
+  cookieName: "osem_admin_session",
+  cookieOptions: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 8, // 8 hours for admin
+  },
+};
+
 export async function getStudentSession() {
   const session = await getIronSession<StudentSession>(
     await cookies(),
-    sessionOptions,
+    studentSessionOptions,
   );
   return session;
 }
@@ -57,7 +70,7 @@ export async function getStudentSession() {
 export async function getAdminSession() {
   const session = await getIronSession<AdminSession>(
     await cookies(),
-    sessionOptions,
+    adminSessionOptions,
   );
   return session;
 }

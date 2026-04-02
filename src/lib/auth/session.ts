@@ -1,6 +1,18 @@
 import { cookies } from "next/headers";
 import { SessionOptions, getIronSession } from "iron-session";
 
+// Extend NextAuth session type to include student_id
+declare module "next-auth" {
+  interface Session {
+    user: {
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+      student_id?: string;
+    };
+  }
+}
+
 // Validate session secret at startup
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret || sessionSecret.length < 32) {
@@ -30,7 +42,7 @@ const sessionOptions: SessionOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 60 * 60 * 4, // 4 hours — covers a full election day
+    maxAge: 60 * 60 * 4,
   },
 };
 

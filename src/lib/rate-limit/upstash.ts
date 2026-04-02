@@ -1,8 +1,18 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
-// Only initialise if env vars are present
-// During local dev without Upstash, we skip rate limiting
+// ── Production guard ───────────────────────────────────────────────
+// In production, Redis MUST be configured — no silent bypass allowed
+if (
+  process.env.NODE_ENV === "production" &&
+  !process.env.UPSTASH_REDIS_REST_URL
+) {
+  throw new Error(
+    "UPSTASH_REDIS_REST_URL is required in production. " +
+      "Rate limiting cannot be disabled on a live election system.",
+  );
+}
+
 const redis = process.env.UPSTASH_REDIS_REST_URL
   ? new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
@@ -37,12 +47,30 @@ export const voteSubmitLimiter = redis
     })
   : null;
 
-// Generic rate limit checker — returns true if allowed, false if blocked
+// ── Normalise rate limit key ───────────────────────────────────────
+// Ensures consistent key format regardless of what the caller passes
+// Strips whitespace, lowercases, removes special characters
+function normaliseKey(key: string): string {
+  return key
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_:\-\.]/g, "_");
+}
+
+// ── Generic rate limit checker ────────────────────────────────────
 export async function checkRateLimit(
   limiter: Ratelimit | null,
   key: string,
 ): Promise<{ allowed: boolean; remaining: number }> {
-  if (!limiter) return { allowed: true, remaining: 999 }; // Dev mode — no Redis
-  const result = await limiter.limit(key);
+  // Dev mode — no Redis configured, allow all requests
+  if (!limiter) {
+    console.warn(
+      "[RATE LIMIT] Running without Redis — all requests allowed. OK in dev only.",
+    );
+    return { allowed: true, remaining: 999 };
+  }
+
+  const normalisedKey = normaliseKey(key);
+  const result = await limiter.limit(normalisedKey);
   return { allowed: result.success, remaining: result.remaining };
 }

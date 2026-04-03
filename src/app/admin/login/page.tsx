@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { ShieldCheck, AlertCircle, Loader2, WifiOff, Lock } from "lucide-react";
 
 function useNetwork() {
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [online, setOnline] = useState(true);
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);

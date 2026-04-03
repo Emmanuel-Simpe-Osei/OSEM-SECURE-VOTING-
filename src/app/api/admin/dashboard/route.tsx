@@ -3,44 +3,37 @@ import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
 
 export async function GET(request: NextRequest) {
-  // Verify admin session
   const session = await getAdminSession();
   if (!session?.admin_id) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  // Get all elections
-  const { data: elections } = await supabaseServer
-    .from("elections")
-    .select("id, title, slug, status, start_time, end_time, created_at")
-    .order("created_at", { ascending: false });
-
-  // Get stats
-  const { count: totalElections } = await supabaseServer
-    .from("elections")
-    .select("*", { count: "exact", head: true });
-
-  const { count: activeElections } = await supabaseServer
-    .from("elections")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "active");
-
-  const { count: totalVoters } = await supabaseServer
-    .from("voter_eligibility")
-    .select("*", { count: "exact", head: true });
-
-  const { count: totalVotesCast } = await supabaseServer
-    .from("ballot_submissions")
-    .select("*", { count: "exact", head: true });
+  // Run all queries in parallel
+  const [electionsRes, activeRes, votersRes, votesRes] = await Promise.all([
+    supabaseServer
+      .from("elections")
+      .select("id, title, slug, status, start_time, end_time, created_at")
+      .order("created_at", { ascending: false }),
+    supabaseServer
+      .from("elections")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "active"),
+    supabaseServer
+      .from("voter_eligibility")
+      .select("id", { count: "exact", head: true }),
+    supabaseServer
+      .from("ballot_submissions")
+      .select("id", { count: "exact", head: true }),
+  ]);
 
   return NextResponse.json({
-    elections: elections || [],
+    elections: electionsRes.data || [],
     admin_email: session.email,
     stats: {
-      total_elections: totalElections || 0,
-      active_elections: activeElections || 0,
-      total_voters: totalVoters || 0,
-      total_votes_cast: totalVotesCast || 0,
+      total_elections: electionsRes.data?.length || 0,
+      active_elections: activeRes.count || 0,
+      total_voters: votersRes.count || 0,
+      total_votes_cast: votesRes.count || 0,
     },
   });
 }

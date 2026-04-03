@@ -11,14 +11,14 @@ import {
   Pause,
   X,
   BarChart3,
-  Upload,
   CheckCircle2,
   Clock,
   AlertTriangle,
   Activity,
   ChevronRight,
   Loader2,
-  Edit3,
+  Copy,
+  WifiOff,
 } from "lucide-react";
 
 interface Election {
@@ -46,10 +46,28 @@ interface Stats {
   turnout_percent: number;
 }
 
+function useNetwork() {
+  const [online, setOnline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  return online;
+}
+
 export default function ElectionDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
+  const online = useNetwork();
 
   const [election, setElection] = useState<Election | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -57,9 +75,12 @@ export default function ElectionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState("");
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     loadElection();
+    setTimeout(() => setMounted(true), 50);
   }, []);
 
   async function loadElection() {
@@ -100,10 +121,18 @@ export default function ElectionDetailPage() {
       }
       setElection((prev) => (prev ? { ...prev, status: newStatus } : prev));
     } catch {
-      setError("Network error.");
+      setError("Network error. Please try again.");
     } finally {
       setActionLoading("");
     }
+  }
+
+  function copyUrl() {
+    const url = `${window.location.origin}/election/${election?.slug}/login`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
   }
 
   function getStatusStyle(status: string) {
@@ -153,10 +182,18 @@ export default function ElectionDetailPage() {
         className="min-h-screen flex items-center justify-center"
         style={{ background: "#0B1E35" }}
       >
-        <Loader2
-          className="w-6 h-6 animate-spin"
-          style={{ color: "#F9A825" }}
-        />
+        <div className="flex flex-col items-center gap-3">
+          <div
+            className="w-12 h-12 rounded-2xl flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg, #F9A825, #E65100)" }}
+          >
+            <ShieldCheck className="w-6 h-6" style={{ color: "#0B1E35" }} />
+          </div>
+          <Loader2
+            className="w-5 h-5 animate-spin"
+            style={{ color: "#F9A825" }}
+          />
+        </div>
       </div>
     );
   }
@@ -166,16 +203,47 @@ export default function ElectionDetailPage() {
   const statusStyle = getStatusStyle(election.status);
   const startDate = new Date(election.start_time);
   const endDate = new Date(election.end_time);
+  const portalUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/election/${election.slug}/login`
+      : `/election/${election.slug}/login`;
 
   return (
     <div
       className="min-h-screen flex flex-col"
       style={{ background: "#0B1E35" }}
     >
+      <style>{`
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .anim-fade-up { animation: fadeUp 0.4s ease forwards; }
+        .anim-fade-in { animation: fadeIn 0.3s ease forwards; }
+      `}</style>
+
+      {/* Network banner */}
+      {!online && (
+        <div
+          className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
+          style={{ background: "#DC2626", color: "#ffffff" }}
+        >
+          <WifiOff className="w-3.5 h-3.5" />
+          No internet connection
+        </div>
+      )}
+
       {/* Header */}
       <div
-        className="w-full px-6 py-4 flex items-center justify-between"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+        className="w-full px-6 py-4 flex items-center justify-between sticky top-0 z-10"
+        style={{
+          background: "#0B1E35",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
       >
         <button
           onClick={() => router.push("/admin/dashboard")}
@@ -204,19 +272,29 @@ export default function ElectionDetailPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-8">
           {/* Election header */}
-          <div className="mb-8">
+          <div
+            className="mb-8"
+            style={{
+              opacity: mounted ? 1 : 0,
+              transform: mounted ? "translateY(0)" : "translateY(12px)",
+              transition: "all 0.4s ease",
+            }}
+          >
             <div className="flex items-start justify-between gap-4 mb-3">
               <h1 className="text-2xl font-bold text-white leading-tight">
                 {election.title}
               </h1>
               <span
-                className="px-3 py-1.5 rounded-full text-xs font-bold shrink-0"
+                className="px-3 py-1.5 rounded-full text-xs font-bold shrink-0 flex items-center gap-1.5"
                 style={{
                   background: statusStyle.bg,
                   color: statusStyle.text,
                   border: `1px solid ${statusStyle.border}`,
                 }}
               >
+                {election.status === "active" && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                )}
                 {election.status.toUpperCase()}
               </span>
             </div>
@@ -238,12 +316,20 @@ export default function ElectionDetailPage() {
                 minute: "2-digit",
               })}
             </p>
+            {election.description && (
+              <p
+                className="text-sm mt-2"
+                style={{ color: "rgba(255,255,255,0.4)" }}
+              >
+                {election.description}
+              </p>
+            )}
           </div>
 
           {/* Error */}
           {error && (
             <div
-              className="flex items-start gap-2.5 rounded-2xl p-4 mb-6"
+              className="flex items-start gap-2.5 rounded-2xl p-4 mb-6 anim-fade-in"
               style={{
                 background: "rgba(220,38,38,0.15)",
                 border: "1px solid rgba(220,38,38,0.3)",
@@ -261,7 +347,14 @@ export default function ElectionDetailPage() {
 
           {/* Stats */}
           {stats && (
-            <div className="grid grid-cols-3 gap-4 mb-8">
+            <div
+              className="grid grid-cols-3 gap-4 mb-6"
+              style={{
+                opacity: mounted ? 1 : 0,
+                transform: mounted ? "translateY(0)" : "translateY(12px)",
+                transition: "all 0.4s ease 0.1s",
+              }}
+            >
               {[
                 {
                   label: "Total Voters",
@@ -281,20 +374,20 @@ export default function ElectionDetailPage() {
               ].map((stat) => (
                 <div
                   key={stat.label}
-                  className="rounded-2xl p-4 text-center"
+                  className="rounded-2xl p-5 text-center"
                   style={{
                     background: "rgba(255,255,255,0.05)",
                     border: "1px solid rgba(255,255,255,0.08)",
                   }}
                 >
                   <p
-                    className="text-2xl font-bold"
+                    className="text-2xl font-bold mb-1"
                     style={{ color: stat.color }}
                   >
                     {stat.value}
                   </p>
                   <p
-                    className="text-xs mt-1"
+                    className="text-xs"
                     style={{ color: "rgba(255,255,255,0.4)" }}
                   >
                     {stat.label}
@@ -304,12 +397,57 @@ export default function ElectionDetailPage() {
             </div>
           )}
 
+          {/* Turnout bar */}
+          {stats && stats.total_voters > 0 && (
+            <div
+              className="rounded-2xl p-5 mb-6"
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <p
+                  className="text-xs font-bold"
+                  style={{ color: "rgba(255,255,255,0.5)" }}
+                >
+                  TURNOUT PROGRESS
+                </p>
+                <p className="text-xs font-bold" style={{ color: "#F9A825" }}>
+                  {stats.turnout_percent}%
+                </p>
+              </div>
+              <div
+                className="w-full h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+              >
+                <div
+                  className="h-2 rounded-full transition-all duration-1000"
+                  style={{
+                    width: mounted ? `${stats.turnout_percent}%` : "0%",
+                    background: "linear-gradient(90deg, #F9A825, #4ADE80)",
+                  }}
+                />
+              </div>
+              <p
+                className="text-xs mt-2"
+                style={{ color: "rgba(255,255,255,0.3)" }}
+              >
+                {stats.has_voted} of {stats.total_voters} voters have cast their
+                ballot
+              </p>
+            </div>
+          )}
+
           {/* Election controls */}
           <div
-            className="rounded-2xl p-6 mb-6"
+            className="rounded-2xl p-6 mb-4"
             style={{
               background: "rgba(255,255,255,0.05)",
               border: "1px solid rgba(255,255,255,0.08)",
+              opacity: mounted ? 1 : 0,
+              transform: mounted ? "translateY(0)" : "translateY(12px)",
+              transition: "all 0.4s ease 0.2s",
             }}
           >
             <h2 className="text-sm font-bold text-white mb-4">
@@ -335,7 +473,8 @@ export default function ElectionDetailPage() {
                   Schedule Election
                 </button>
               )}
-              {election.status === "scheduled" && (
+              {(election.status === "scheduled" ||
+                election.status === "draft") && (
                 <button
                   onClick={() => changeStatus("active")}
                   disabled={!!actionLoading}
@@ -444,18 +583,33 @@ export default function ElectionDetailPage() {
                   View & Publish Results
                 </button>
               )}
+              {election.status === "draft" && (
+                <p
+                  className="text-xs self-center"
+                  style={{ color: "rgba(255,255,255,0.3)" }}
+                >
+                  Add candidates and voters before opening voting.
+                </p>
+              )}
             </div>
           </div>
 
           {/* Management sections */}
-          <div className="grid grid-cols-1 gap-4 mb-6">
+          <div
+            className="grid grid-cols-1 gap-3 mb-4"
+            style={{
+              opacity: mounted ? 1 : 0,
+              transform: mounted ? "translateY(0)" : "translateY(12px)",
+              transition: "all 0.4s ease 0.3s",
+            }}
+          >
             {/* Voters */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/voters`)}
-              className="text-left transition-all active:scale-99"
+              className="text-left transition-all active:scale-99 group"
             >
               <div
-                className="rounded-2xl p-5 flex items-center gap-4"
+                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200 group-hover:border-opacity-30"
                 style={{
                   background: "rgba(255,255,255,0.05)",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -482,7 +636,7 @@ export default function ElectionDetailPage() {
                   </p>
                 </div>
                 <ChevronRight
-                  className="w-4 h-4"
+                  className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                   style={{ color: "rgba(255,255,255,0.3)" }}
                 />
               </div>
@@ -491,10 +645,10 @@ export default function ElectionDetailPage() {
             {/* Candidates */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/candidates`)}
-              className="text-left transition-all active:scale-99"
+              className="text-left transition-all active:scale-99 group"
             >
               <div
-                className="rounded-2xl p-5 flex items-center gap-4"
+                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200"
                 style={{
                   background: "rgba(255,255,255,0.05)",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -523,17 +677,17 @@ export default function ElectionDetailPage() {
                   </p>
                 </div>
                 <ChevronRight
-                  className="w-4 h-4"
+                  className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                   style={{ color: "rgba(255,255,255,0.3)" }}
                 />
               </div>
             </button>
 
-            {/* Monitoring */}
+            {/* Live Monitoring */}
             {(election.status === "active" || election.status === "paused") && (
               <button
                 onClick={() => router.push(`/admin/elections/${id}/monitoring`)}
-                className="text-left transition-all active:scale-99"
+                className="text-left transition-all active:scale-99 group"
               >
                 <div
                   className="rounded-2xl p-5 flex items-center gap-4"
@@ -572,7 +726,7 @@ export default function ElectionDetailPage() {
                     </p>
                   </div>
                   <ChevronRight
-                    className="w-4 h-4"
+                    className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                     style={{ color: "rgba(255,255,255,0.3)" }}
                   />
                 </div>
@@ -584,7 +738,7 @@ export default function ElectionDetailPage() {
               election.status === "archived") && (
               <button
                 onClick={() => router.push(`/admin/elections/${id}/results`)}
-                className="text-left transition-all active:scale-99"
+                className="text-left transition-all active:scale-99 group"
               >
                 <div
                   className="rounded-2xl p-5 flex items-center gap-4"
@@ -615,7 +769,7 @@ export default function ElectionDetailPage() {
                     </p>
                   </div>
                   <ChevronRight
-                    className="w-4 h-4"
+                    className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                     style={{ color: "rgba(255,255,255,0.3)" }}
                   />
                 </div>
@@ -623,22 +777,60 @@ export default function ElectionDetailPage() {
             )}
           </div>
 
-          {/* Voter portal link */}
+          {/* Voter portal URL */}
           <div
-            className="rounded-2xl p-4"
+            className="rounded-2xl p-5"
             style={{
               background: "rgba(255,255,255,0.03)",
               border: "1px solid rgba(255,255,255,0.06)",
+              opacity: mounted ? 1 : 0,
+              transition: "opacity 0.4s ease 0.4s",
             }}
           >
             <p
-              className="text-xs font-bold mb-1"
+              className="text-xs font-bold mb-3"
               style={{ color: "rgba(255,255,255,0.4)" }}
             >
               VOTER PORTAL URL
             </p>
-            <p className="text-xs font-mono" style={{ color: "#F9A825" }}>
-              /election/{election.slug}/login
+            <div className="flex items-center gap-3">
+              <p
+                className="text-xs font-mono flex-1 break-all leading-relaxed"
+                style={{ color: "#F9A825" }}
+              >
+                {portalUrl}
+              </p>
+              <button
+                onClick={copyUrl}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95"
+                style={{
+                  background: copied
+                    ? "rgba(22,163,74,0.2)"
+                    : "rgba(249,168,37,0.15)",
+                  color: copied ? "#4ADE80" : "#F9A825",
+                  border: copied
+                    ? "1px solid rgba(22,163,74,0.3)"
+                    : "1px solid rgba(249,168,37,0.3)",
+                }}
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy URL
+                  </>
+                )}
+              </button>
+            </div>
+            <p
+              className="text-xs mt-3"
+              style={{ color: "rgba(255,255,255,0.25)" }}
+            >
+              Share this URL with eligible voters on election day.
             </p>
           </div>
         </div>
@@ -646,15 +838,20 @@ export default function ElectionDetailPage() {
 
       {/* Footer */}
       <div
-        className="w-full px-6 py-4 flex items-center justify-center gap-2"
+        className="w-full px-6 py-4 flex items-center justify-between"
         style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
       >
-        <div
-          className="w-1.5 h-1.5 rounded-full"
-          style={{ background: "#16A34A" }}
-        />
+        <div className="flex items-center gap-2">
+          <div
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: online ? "#16A34A" : "#DC2626" }}
+          />
+          <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+            {online ? "Connection secure" : "No connection"}
+          </p>
+        </div>
         <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-          Secured · Powered by{" "}
+          Powered by{" "}
           <span
             className="font-semibold"
             style={{ color: "rgba(255,255,255,0.5)" }}

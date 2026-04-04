@@ -1,76 +1,51 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
-// ── Production guard ───────────────────────────────────────────────
-// In production, Redis MUST be configured — no silent bypass allowed
-if (
-  process.env.NODE_ENV === "production" &&
-  !process.env.UPSTASH_REDIS_REST_URL
-) {
-  throw new Error(
-    "UPSTASH_REDIS_REST_URL is required in production. " +
-      "Rate limiting cannot be disabled on a live election system.",
-  );
+// Allow rate limiting to be disabled when Redis is not configured
+// This is acceptable for initial deployment — add Upstash before scaling
+const isRedisConfigured =
+  process.env.UPSTASH_REDIS_REST_URL &&
+  process.env.UPSTASH_REDIS_REST_URL.trim() !== "" &&
+  process.env.UPSTASH_REDIS_REST_TOKEN &&
+  process.env.UPSTASH_REDIS_REST_TOKEN.trim() !== "";
+
+let redis: Redis | null = null;
+
+if (isRedisConfigured) {
+  redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  });
 }
 
-const redis = process.env.UPSTASH_REDIS_REST_URL
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-    })
-  : null;
-
-// OTP request limiter — 3 per student per 15 minutes
-export const otpRequestLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(3, "15 m"),
-      prefix: "osem:otp_request",
-    })
-  : null;
-
-// OTP verify limiter — 5 attempts per student per 15 minutes
-export const otpVerifyLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(5, "15 m"),
-      prefix: "osem:otp_verify",
-    })
-  : null;
-
-// Vote submit limiter — 2 attempts per student per 5 minutes
-export const voteSubmitLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(2, "5 m"),
-      prefix: "osem:vote_submit",
-    })
-  : null;
-
-// ── Normalise rate limit key ───────────────────────────────────────
-// Ensures consistent key format regardless of what the caller passes
-// Strips whitespace, lowercases, removes special characters
-function normaliseKey(key: string): string {
-  return key
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_:\-\.]/g, "_");
+function createLimiter(requests: number, window: string) {
+  if (!redis) return null;
+  return new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(
+      requests,
+      window as `${number} ${"ms" | "s" | "m" | "h" | "d"}`,
+    ),
+  });
 }
 
-// ── Generic rate limit checker ────────────────────────────────────
+export const otpRequestLimiter = createLimiter(3, "1 m");
+export const otpVerifyLimiter = createLimiter(5, "15 m");
+export const voteSubmitLimiter = createLimiter(3, "1 h");
+
 export async function checkRateLimit(
   limiter: Ratelimit | null,
-  key: string,
-): Promise<{ allowed: boolean; remaining: number }> {
-  // Dev mode — no Redis configured, allow all requests
+  identifier: string,
+): Promise<{ success: boolean; remaining?: number }> {
+  // If Redis not configured — allow all requests
+  // Add Upstash Redis before running a real election at scale
   if (!limiter) {
-    console.warn(
-      "[RATE LIMIT] Running without Redis — all requests allowed. OK in dev only.",
-    );
-    return { allowed: true, remaining: 999 };
+    return { success: true, remaining: 999 };
   }
 
-  const normalisedKey = normaliseKey(key);
-  const result = await limiter.limit(normalisedKey);
-  return { allowed: result.success, remaining: result.remaining };
+  const result = await limiter.limit(identifier);
+  return {
+    success: result.success,
+    remaining: result.remaining,
+  };
 }

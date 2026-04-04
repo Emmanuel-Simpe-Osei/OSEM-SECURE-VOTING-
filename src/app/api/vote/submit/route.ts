@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
       voteSubmitLimiter,
       `student:${session.student_id}`,
     );
-    if (!studentLimit.allowed) {
+    if (!studentLimit.success) {
       return NextResponse.json(
         { error: "Too many attempts. Please wait and try again." },
         { status: 429 },
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       voteSubmitLimiter,
       getIPRateLimitKey(request, "vote_submit"),
     );
-    if (!ipLimit.allowed) {
+    if (!ipLimit.success) {
       return NextResponse.json(
         { error: "Too many attempts. Please wait and try again." },
         { status: 429 },

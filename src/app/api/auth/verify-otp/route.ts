@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
       otpVerifyLimiter,
       `student:${student_id}`,
     );
-    if (!studentLimit.allowed) {
+    if (!studentLimit.success) {
       return NextResponse.json(GENERIC_ERROR, { status: 429 });
     }
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       otpVerifyLimiter,
       getIPRateLimitKey(request, "otp_verify"),
     );
-    if (!ipLimit.allowed) {
+    if (!ipLimit.success) {
       return NextResponse.json(GENERIC_ERROR, { status: 429 });
     }
 

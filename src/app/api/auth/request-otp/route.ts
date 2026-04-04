@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       otpRequestLimiter,
       `student:${student_id}`,
     );
-    if (!studentLimit.allowed) {
+    if (!studentLimit.success) {
       await supabaseServer.from("incident_flags").insert({
         student_id,
         reason: "OTP_REQUEST_RATE_LIMIT_EXCEEDED",
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       otpRequestLimiter,
       getIPRateLimitKey(request, "otp_request"),
     );
-    if (!ipLimit.allowed) {
+    if (!ipLimit.success) {
       return NextResponse.json(GENERIC_ERROR, { status: 429 });
     }
 

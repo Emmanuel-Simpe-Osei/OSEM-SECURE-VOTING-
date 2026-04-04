@@ -47,9 +47,7 @@ interface Stats {
 }
 
 function useNetwork() {
-  const [online, setOnline] = useState(
-    typeof navigator !== "undefined" ? navigator.onLine : true,
-  );
+  const [online, setOnline] = useState(() => navigator.onLine);
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -76,6 +74,7 @@ export default function ElectionDetailPage() {
   const [actionLoading, setActionLoading] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedResults, setCopiedResults] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -132,6 +131,14 @@ export default function ElectionDetailPage() {
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
+  function copyResultsUrl() {
+    const url = `${window.location.origin}/election/${election?.slug}/results`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedResults(true);
+      setTimeout(() => setCopiedResults(false), 2500);
     });
   }
 
@@ -207,6 +214,10 @@ export default function ElectionDetailPage() {
     typeof window !== "undefined"
       ? `${window.location.origin}/election/${election.slug}/login`
       : `/election/${election.slug}/login`;
+  const resultsUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/election/${election.slug}/results`
+      : `/election/${election.slug}/results`;
 
   return (
     <div
@@ -218,12 +229,6 @@ export default function ElectionDetailPage() {
           from { opacity: 0; transform: translateY(12px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        .anim-fade-up { animation: fadeUp 0.4s ease forwards; }
-        .anim-fade-in { animation: fadeIn 0.3s ease forwards; }
       `}</style>
 
       {/* Network banner */}
@@ -329,7 +334,7 @@ export default function ElectionDetailPage() {
           {/* Error */}
           {error && (
             <div
-              className="flex items-start gap-2.5 rounded-2xl p-4 mb-6 anim-fade-in"
+              className="flex items-start gap-2.5 rounded-2xl p-4 mb-6"
               style={{
                 background: "rgba(220,38,38,0.15)",
                 border: "1px solid rgba(220,38,38,0.3)",
@@ -439,7 +444,7 @@ export default function ElectionDetailPage() {
             </div>
           )}
 
-          {/* Election controls */}
+          {/* Controls */}
           <div
             className="rounded-2xl p-6 mb-4"
             style={{
@@ -603,13 +608,12 @@ export default function ElectionDetailPage() {
               transition: "all 0.4s ease 0.3s",
             }}
           >
-            {/* Voters */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/voters`)}
               className="text-left transition-all active:scale-99 group"
             >
               <div
-                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200 group-hover:border-opacity-30"
+                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200"
                 style={{
                   background: "rgba(255,255,255,0.05)",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -642,7 +646,6 @@ export default function ElectionDetailPage() {
               </div>
             </button>
 
-            {/* Candidates */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/candidates`)}
               className="text-left transition-all active:scale-99 group"
@@ -683,7 +686,6 @@ export default function ElectionDetailPage() {
               </div>
             </button>
 
-            {/* Live Monitoring */}
             {(election.status === "active" || election.status === "paused") && (
               <button
                 onClick={() => router.push(`/admin/elections/${id}/monitoring`)}
@@ -733,7 +735,6 @@ export default function ElectionDetailPage() {
               </button>
             )}
 
-            {/* Results */}
             {(election.status === "closed" ||
               election.status === "archived") && (
               <button
@@ -765,7 +766,9 @@ export default function ElectionDetailPage() {
                       className="text-xs mt-0.5"
                       style={{ color: "rgba(255,255,255,0.4)" }}
                     >
-                      View and publish election results
+                      {election.results_visibility === "public_after_close"
+                        ? "Published — students can see results"
+                        : "View and publish election results"}
                     </p>
                   </div>
                   <ChevronRight
@@ -779,7 +782,7 @@ export default function ElectionDetailPage() {
 
           {/* Voter portal URL */}
           <div
-            className="rounded-2xl p-5"
+            className="rounded-2xl p-5 mb-4"
             style={{
               background: "rgba(255,255,255,0.03)",
               border: "1px solid rgba(255,255,255,0.06)",
@@ -833,6 +836,117 @@ export default function ElectionDetailPage() {
               Share this URL with eligible voters on election day.
             </p>
           </div>
+
+          {/* Public results URL — only when closed */}
+          {(election.status === "closed" || election.status === "archived") && (
+            <div
+              className="rounded-2xl p-5"
+              style={{
+                background:
+                  election.results_visibility === "public_after_close"
+                    ? "rgba(22,163,74,0.06)"
+                    : "rgba(255,255,255,0.03)",
+                border:
+                  election.results_visibility === "public_after_close"
+                    ? "1px solid rgba(22,163,74,0.2)"
+                    : "1px solid rgba(255,255,255,0.06)",
+                opacity: mounted ? 1 : 0,
+                transition: "opacity 0.4s ease 0.5s",
+              }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <p
+                  className="text-xs font-bold"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  PUBLIC RESULTS URL
+                </p>
+                {election.results_visibility === "public_after_close" ? (
+                  <span
+                    className="flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: "rgba(22,163,74,0.15)",
+                      color: "#4ADE80",
+                    }}
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    Published
+                  </span>
+                ) : (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.3)",
+                    }}
+                  >
+                    Not published
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <p
+                  className="text-xs font-mono flex-1 break-all leading-relaxed"
+                  style={{
+                    color:
+                      election.results_visibility === "public_after_close"
+                        ? "#4ADE80"
+                        : "rgba(255,255,255,0.25)",
+                  }}
+                >
+                  {resultsUrl}
+                </p>
+                {election.results_visibility === "public_after_close" ? (
+                  <button
+                    onClick={copyResultsUrl}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95"
+                    style={{
+                      background: copiedResults
+                        ? "rgba(22,163,74,0.3)"
+                        : "rgba(22,163,74,0.15)",
+                      color: "#4ADE80",
+                      border: "1px solid rgba(22,163,74,0.3)",
+                    }}
+                  >
+                    {copiedResults ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        Copy URL
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() =>
+                      router.push(`/admin/elections/${id}/results`)
+                    }
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95"
+                    style={{
+                      background: "rgba(249,168,37,0.15)",
+                      color: "#F9A825",
+                      border: "1px solid rgba(249,168,37,0.3)",
+                    }}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    Publish
+                  </button>
+                )}
+              </div>
+              <p
+                className="text-xs mt-3"
+                style={{ color: "rgba(255,255,255,0.25)" }}
+              >
+                {election.results_visibility === "public_after_close"
+                  ? "Share this URL with students and the public to view official results."
+                  : "Publish results first to activate this URL."}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

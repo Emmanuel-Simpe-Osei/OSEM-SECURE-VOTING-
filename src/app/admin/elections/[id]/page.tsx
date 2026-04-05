@@ -19,6 +19,7 @@ import {
   Loader2,
   Copy,
   WifiOff,
+  Headphones,
 } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/utils/time";
 
@@ -761,6 +762,50 @@ export default function ElectionDetailPage() {
                       style={{ color: "rgba(255,255,255,0.4)" }}
                     >
                       Real-time turnout and activity
+                    </p>
+                  </div>
+                  <ChevronRight
+                    className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
+                    style={{ color: "rgba(255,255,255,0.3)" }}
+                  />
+                </div>
+              </button>
+            )}
+
+            {/* Voter Support — active/paused only */}
+            {(election.status === "active" || election.status === "paused") && (
+              <button
+                onClick={() => router.push(`/admin/elections/${id}/support`)}
+                className="text-left transition-all active:scale-99 group"
+              >
+                <div
+                  className="rounded-2xl p-5 flex items-center gap-4"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <div
+                    className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                    style={{
+                      background: "rgba(96,165,250,0.15)",
+                      border: "1px solid rgba(96,165,250,0.3)",
+                    }}
+                  >
+                    <Headphones
+                      className="w-5 h-5"
+                      style={{ color: "#60A5FA" }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-sm text-white">
+                      Voter Support
+                    </p>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: "rgba(255,255,255,0.4)" }}
+                    >
+                      Fix voter issues · Manual override
                     </p>
                   </div>
                   <ChevronRight

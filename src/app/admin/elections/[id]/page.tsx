@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { formatDate, formatTime } from "@/lib/utils/time";
 import {
   ShieldCheck,
   ArrowLeft,
@@ -21,6 +20,7 @@ import {
   Copy,
   WifiOff,
 } from "lucide-react";
+import { formatDate, formatTime } from "@/lib/utils/time";
 
 interface Election {
   id: string;
@@ -209,8 +209,6 @@ export default function ElectionDetailPage() {
   if (!election) return null;
 
   const statusStyle = getStatusStyle(election.status);
-  const startDate = new Date(election.start_time);
-  const endDate = new Date(election.end_time);
   const portalUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/election/${election.slug}/login`
@@ -305,22 +303,11 @@ export default function ElectionDetailPage() {
               </span>
             </div>
             <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-              {startDate.toLocaleDateString("en-GB", {
-                weekday: "short",
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
+              {formatDate(election.start_time)}
               {" · "}
-              {startDate.toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {formatTime(election.start_time)}
               {" → "}
-              {endDate.toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {formatTime(election.end_time)}
             </p>
             {election.description && (
               <p
@@ -609,6 +596,7 @@ export default function ElectionDetailPage() {
               transition: "all 0.4s ease 0.3s",
             }}
           >
+            {/* Voter Register */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/voters`)}
               className="text-left transition-all active:scale-99 group"
@@ -647,6 +635,7 @@ export default function ElectionDetailPage() {
               </div>
             </button>
 
+            {/* Candidates & Positions */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/candidates`)}
               className="text-left transition-all active:scale-99 group"
@@ -687,6 +676,52 @@ export default function ElectionDetailPage() {
               </div>
             </button>
 
+            {/* Pre-Election Checklist — draft/scheduled only */}
+            {(election.status === "draft" ||
+              election.status === "scheduled") && (
+              <button
+                onClick={() => router.push(`/admin/elections/${id}/checklist`)}
+                className="text-left transition-all active:scale-99 group"
+              >
+                <div
+                  className="rounded-2xl p-5 flex items-center gap-4"
+                  style={{
+                    background: "rgba(249,168,37,0.06)",
+                    border: "1px solid rgba(249,168,37,0.2)",
+                  }}
+                >
+                  <div
+                    className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                    style={{
+                      background: "rgba(249,168,37,0.15)",
+                      border: "1px solid rgba(249,168,37,0.3)",
+                    }}
+                  >
+                    <CheckCircle2
+                      className="w-5 h-5"
+                      style={{ color: "#F9A825" }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-sm text-white">
+                      Pre-Election Checklist
+                    </p>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: "rgba(255,255,255,0.4)" }}
+                    >
+                      Verify everything is ready before opening voting
+                    </p>
+                  </div>
+                  <ChevronRight
+                    className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
+                    style={{ color: "rgba(255,255,255,0.3)" }}
+                  />
+                </div>
+              </button>
+            )}
+
+            {/* Live Monitoring — active/paused only */}
             {(election.status === "active" || election.status === "paused") && (
               <button
                 onClick={() => router.push(`/admin/elections/${id}/monitoring`)}
@@ -736,6 +771,7 @@ export default function ElectionDetailPage() {
               </button>
             )}
 
+            {/* Results — closed/archived only */}
             {(election.status === "closed" ||
               election.status === "archived") && (
               <button
@@ -838,7 +874,7 @@ export default function ElectionDetailPage() {
             </p>
           </div>
 
-          {/* Public results URL — only when closed */}
+          {/* Public results URL */}
           {(election.status === "closed" || election.status === "archived") && (
             <div
               className="rounded-2xl p-5"

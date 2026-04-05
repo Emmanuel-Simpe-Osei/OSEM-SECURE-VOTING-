@@ -1,5 +1,5 @@
 "use client";
-
+import { formatDateTime, formatShortDateTime } from "@/lib/utils/time";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -259,7 +259,15 @@ export default function PublicResultsPage() {
           </div>
           <div style={{ textAlign: "right" }}>
             <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.8)" }}>
-              Printed: {new Date().toLocaleString("en-GB")}
+              Printed:{" "}
+              {new Date().toLocaleString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+              })}
             </p>
           </div>
         </div>

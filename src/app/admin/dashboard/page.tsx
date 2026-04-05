@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { formatDate, formatTime } from "@/lib/utils/time";
 import { useRouter } from "next/navigation";
 import {
   ShieldCheck,
@@ -304,8 +305,6 @@ export default function AdminDashboard() {
             <div className="space-y-3">
               {elections.map((election) => {
                 const statusStyle = getStatusColor(election.status);
-                const startDate = new Date(election.start_time);
-                const endDate = new Date(election.end_time);
                 return (
                   <button
                     key={election.id}
@@ -315,13 +314,13 @@ export default function AdminDashboard() {
                     className="w-full text-left transition-all active:scale-99"
                   >
                     <div
-                      className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200"
+                      className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200 hover:border-opacity-30"
                       style={{
                         background: "rgba(255,255,255,0.05)",
                         border: "1px solid rgba(255,255,255,0.08)",
                       }}
                     >
-                      {/* Status dot */}
+                      {/* Status icon */}
                       <div
                         className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
                         style={{
@@ -369,21 +368,16 @@ export default function AdminDashboard() {
                             {election.status}
                           </span>
                         </div>
+                        {/* ✅ 12-hour time format */}
                         <p
                           className="text-xs"
                           style={{ color: "rgba(255,255,255,0.3)" }}
                         >
-                          {startDate.toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
+                          {formatDate(election.start_time)}
+                          {" · "}
+                          {formatTime(election.start_time)}
                           {" → "}
-                          {endDate.toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
+                          {formatTime(election.end_time)}
                         </p>
                       </div>
 

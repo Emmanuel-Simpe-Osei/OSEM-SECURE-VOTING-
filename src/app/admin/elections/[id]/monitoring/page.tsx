@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { formatTimeWithSeconds, formatShortDateTime } from "@/lib/utils/time";
 import { useParams, useRouter } from "next/navigation";
 import {
   ShieldCheck,
@@ -120,11 +121,7 @@ export default function AdminMonitoringPage() {
   }
 
   function formatTime(dateStr: string) {
-    return new Date(dateStr).toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+    return formatTimeWithSeconds(dateStr);
   }
 
   function openDisplayScreen() {
@@ -442,16 +439,7 @@ export default function AdminMonitoringPage() {
                 className="text-xs mt-0.5"
                 style={{ color: "rgba(255,255,255,0.3)" }}
               >
-                Closes{" "}
-                {new Date(data?.election.end_time || "").toLocaleString(
-                  "en-GB",
-                  {
-                    day: "numeric",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                )}
+                Closes {formatShortDateTime(data?.election.end_time || "")}
               </p>
             </div>
           </div>

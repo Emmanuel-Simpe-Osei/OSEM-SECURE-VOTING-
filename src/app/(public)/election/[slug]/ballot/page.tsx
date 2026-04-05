@@ -228,11 +228,12 @@ export default function BallotPage() {
       setConfirmationCode(data.confirmation_code);
       setSubmittedAt(
         new Date().toLocaleString("en-GB", {
-          hour: "2-digit",
-          minute: "2-digit",
           day: "numeric",
           month: "long",
           year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
         }),
       );
 

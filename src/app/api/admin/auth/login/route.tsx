@@ -13,7 +13,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const parsed = loginSchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Invalid credentials." },
@@ -23,37 +22,11 @@ export async function POST(request: NextRequest) {
 
     const { email, password } = parsed.data;
 
-    // Check email is in admin whitelist
-    const allowedEmails = (process.env.ADMIN_ALLOWED_EMAILS || "")
-      .split(",")
-      .map((e) => e.trim());
-
-    console.log("[admin/login] allowedEmails:", allowedEmails);
     console.log("[admin/login] email:", email);
-    console.log("[admin/login] is allowed:", allowedEmails.includes(email));
 
-    if (!allowedEmails.includes(email)) {
-      await supabaseServer.from("audit_logs").insert({
-        actor_type: "system",
-        actor_id: "unknown",
-        action: "ADMIN_LOGIN_UNAUTHORIZED",
-        target_type: "admin",
-        target_id: email,
-        metadata: { email },
-        ip_hash: "server-side",
-      });
-      return NextResponse.json(
-        { error: "Invalid credentials." },
-        { status: 401 },
-      );
-    }
-
-    // Verify with Supabase Auth
+    // Verify with Supabase Auth first
     const { data: authData, error: authError } =
-      await supabaseServer.auth.signInWithPassword({
-        email,
-        password,
-      });
+      await supabaseServer.auth.signInWithPassword({ email, password });
 
     console.log("[admin/login] authError:", authError);
     console.log("[admin/login] authData user id:", authData?.user?.id);
@@ -65,7 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check admin_users table
+    // Check admin_users table — this is the single source of truth
     const { data: adminUser, error: adminError } = await supabaseServer
       .from("admin_users")
       .select("id, role, is_active")
@@ -76,6 +49,15 @@ export async function POST(request: NextRequest) {
     console.log("[admin/login] adminUser:", adminUser);
 
     if (!adminUser || !adminUser.is_active) {
+      await supabaseServer.from("audit_logs").insert({
+        actor_type: "system",
+        actor_id: "unknown",
+        action: "ADMIN_LOGIN_UNAUTHORIZED",
+        target_type: "admin",
+        target_id: email,
+        metadata: { email },
+        ip_hash: "server-side",
+      });
       return NextResponse.json(
         { error: "Admin account not found or inactive." },
         { status: 401 },
@@ -90,7 +72,13 @@ export async function POST(request: NextRequest) {
     session.session_id = generateToken(16);
     await session.save();
 
-    // Write audit log
+    // Update last login
+    await supabaseServer
+      .from("admin_users")
+      .update({ last_login_at: new Date().toISOString() })
+      .eq("user_id", authData.user.id);
+
+    // Audit log
     await supabaseServer.from("audit_logs").insert({
       actor_type: "admin",
       actor_id: authData.user.id,

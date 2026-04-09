@@ -13,6 +13,9 @@ const uploadSchema = z.object({
         full_name: z.string().min(1),
         department: z.string().nullable().optional(),
         level: z.string().nullable().optional(),
+        programme_session: z.string().nullable().optional(),
+        programme: z.string().nullable().optional(),
+        gender: z.string().nullable().optional(),
       }),
     )
     .min(1),
@@ -26,7 +29,6 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   const parsed = uploadSchema.safeParse(body);
-
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid data." }, { status: 400 });
   }
@@ -51,14 +53,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Insert voters with ON CONFLICT DO NOTHING
+  // Build rows with all new fields
   const rows = voters.map((v) => ({
     election_id,
-    student_id: v.student_id,
-    school_email: v.school_email,
-    full_name: v.full_name,
+    student_id: v.student_id.toString().trim(),
+    school_email: v.school_email.toLowerCase().trim(),
+    full_name: v.full_name.trim(),
     department: v.department || null,
     level: v.level || null,
+    programme_session: v.programme_session || null,
+    programme: v.programme || null,
+    gender: v.gender || null,
     eligible: true,
     has_voted: false,
   }));

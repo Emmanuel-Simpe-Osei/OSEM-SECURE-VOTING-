@@ -3,13 +3,9 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ShieldCheck, AlertCircle, Loader2, WifiOff, Lock } from "lucide-react";
-import { signIn } from "next-auth/react";
 
 function useNetwork() {
-  const [online, setOnline] = useState(() => {
-    if (typeof navigator === "undefined") return true;
-    return navigator.onLine;
-  });
+  const [online, setOnline] = useState(() => navigator.onLine);
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -79,16 +75,9 @@ function AdminLoginInner() {
     setGoogleLoading(true);
     setError("");
     try {
-      await signIn(
-        "google",
-        {
-          callbackUrl: "/api/admin/auth/complete-google",
-        },
-        {
-          // Pass admin flag in state so signIn callback allows non-upsamail emails
-          state: encodeURIComponent(JSON.stringify({ admin: true })),
-        },
-      );
+      const res = await fetch("/api/admin/auth/google-url");
+      const data = await res.json();
+      window.location.href = data.url;
     } catch {
       setError("Google sign in failed. Please try again.");
       setGoogleLoading(false);
@@ -253,7 +242,7 @@ function AdminLoginInner() {
                 <GoogleIcon />
               )}
               {googleLoading
-                ? "Signing in with Google..."
+                ? "Redirecting to Google..."
                 : "Sign in with Google"}
             </button>
 

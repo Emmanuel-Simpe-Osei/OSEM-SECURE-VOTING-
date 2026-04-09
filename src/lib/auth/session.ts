@@ -26,8 +26,8 @@ export interface StudentSession {
   election_id: string;
   session_id: string;
   created_at: string;
+  session_verified?: boolean;
 }
-
 export interface AdminSession {
   admin_id: string;
   email: string;

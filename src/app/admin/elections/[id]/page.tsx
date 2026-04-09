@@ -32,6 +32,8 @@ interface Election {
   end_time: string;
   results_visibility: string;
   description: string | null;
+  session_verification_enabled: boolean;
+  session_verification_message: string;
 }
 
 interface Position {
@@ -47,17 +49,17 @@ interface Stats {
   has_voted: number;
   turnout_percent: number;
 }
-
 function useNetwork() {
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [online, setOnline] = useState(true);
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
+    // Set initial value on client only
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
     return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
     };
   }, []);
   return online;
@@ -79,6 +81,14 @@ export default function ElectionDetailPage() {
   const [copiedResults, setCopiedResults] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  // Session verification state
+  const [sessionVerification, setSessionVerification] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState(
+    "Your session could not be verified. Please visit the admin desk with your student ID or proof of registration to complete your verification.",
+  );
+  const [savingSession, setSavingSession] = useState(false);
+  const [sessionSaved, setSessionSaved] = useState(false);
+
   useEffect(() => {
     loadElection();
     setTimeout(() => setMounted(true), 50);
@@ -99,6 +109,13 @@ export default function ElectionDetailPage() {
       setElection(data.election);
       setPositions(data.positions || []);
       setStats(data.stats);
+      setSessionVerification(
+        data.election.session_verification_enabled || false,
+      );
+      setSessionMessage(
+        data.election.session_verification_message ||
+          "Your session could not be verified. Please visit the admin desk with your student ID or proof of registration to complete your verification.",
+      );
     } catch {
       setError("Failed to load election.");
     } finally {
@@ -125,6 +142,31 @@ export default function ElectionDetailPage() {
       setError("Network error. Please try again.");
     } finally {
       setActionLoading("");
+    }
+  }
+
+  async function saveSessionVerification() {
+    setSavingSession(true);
+    try {
+      const res = await fetch(
+        `/api/admin/elections/${id}/session-verification`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enabled: sessionVerification,
+            message: sessionMessage,
+            available_sessions: ["Morning", "Evening", "Weekend"],
+          }),
+        },
+      );
+      if (res.ok) {
+        setSessionSaved(true);
+        setTimeout(() => setSessionSaved(false), 2500);
+      }
+    } catch {
+    } finally {
+      setSavingSession(false);
     }
   }
 
@@ -860,6 +902,143 @@ export default function ElectionDetailPage() {
                 </div>
               </button>
             )}
+          </div>
+
+          {/* Session Verification Toggle */}
+          <div
+            className="rounded-2xl p-5 mb-4"
+            style={{
+              background: sessionVerification
+                ? "rgba(249,168,37,0.06)"
+                : "rgba(255,255,255,0.03)",
+              border: sessionVerification
+                ? "1px solid rgba(249,168,37,0.25)"
+                : "1px solid rgba(255,255,255,0.06)",
+              opacity: mounted ? 1 : 0,
+              transition: "opacity 0.4s ease 0.38s",
+            }}
+          >
+            {/* Header row */}
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-bold text-white">
+                  Session Verification
+                </p>
+                <p
+                  className="text-xs mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  Require students to confirm their session before voting
+                </p>
+              </div>
+              {/* Toggle switch */}
+              <button
+                onClick={() => setSessionVerification((v) => !v)}
+                className="relative w-12 h-6 rounded-full transition-all shrink-0"
+                style={{
+                  background: sessionVerification
+                    ? "rgba(249,168,37,0.8)"
+                    : "rgba(255,255,255,0.1)",
+                }}
+              >
+                <div
+                  className="absolute top-0.5 w-5 h-5 rounded-full transition-all"
+                  style={{
+                    background: "#ffffff",
+                    left: sessionVerification ? "calc(100% - 22px)" : "2px",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                  }}
+                />
+              </button>
+            </div>
+
+            {/* Message customizer — only when enabled */}
+            {sessionVerification && (
+              <div className="mt-2 space-y-3">
+                <div>
+                  <label
+                    className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
+                    style={{ color: "rgba(255,255,255,0.4)" }}
+                  >
+                    Message shown to blocked students
+                  </label>
+                  <textarea
+                    value={sessionMessage}
+                    onChange={(e) => setSessionMessage(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 rounded-2xl text-sm outline-none resize-none"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "#ffffff",
+                    }}
+                    placeholder="Your session could not be verified. Please visit Room 6 with your student ID or proof of registration."
+                  />
+                  <p
+                    className="text-xs mt-1.5"
+                    style={{ color: "rgba(255,255,255,0.3)" }}
+                  >
+                    Tip: Include the room number and what to bring (student ID
+                    or proof of registration for Level 100)
+                  </p>
+                </div>
+
+                {/* Sessions */}
+                <div>
+                  <p
+                    className="text-xs font-bold mb-2 uppercase tracking-wide"
+                    style={{ color: "rgba(255,255,255,0.4)" }}
+                  >
+                    Available Sessions
+                  </p>
+                  <div className="flex gap-2">
+                    {["Morning", "Evening", "Weekend"].map((s) => (
+                      <span
+                        key={s}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold"
+                        style={{
+                          background: "rgba(249,168,37,0.1)",
+                          color: "#F9A825",
+                          border: "1px solid rgba(249,168,37,0.2)",
+                        }}
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Save button */}
+            <button
+              onClick={saveSessionVerification}
+              disabled={savingSession}
+              className="w-full mt-4 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+              style={{
+                background: sessionSaved
+                  ? "rgba(22,163,74,0.2)"
+                  : "rgba(249,168,37,0.15)",
+                color: sessionSaved ? "#4ADE80" : "#F9A825",
+                border: sessionSaved
+                  ? "1px solid rgba(22,163,74,0.3)"
+                  : "1px solid rgba(249,168,37,0.3)",
+              }}
+            >
+              {savingSession ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Saving...
+                </>
+              ) : sessionSaved ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Saved!
+                </>
+              ) : (
+                "Save Settings"
+              )}
+            </button>
           </div>
 
           {/* Voter portal URL */}

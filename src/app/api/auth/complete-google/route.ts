@@ -16,7 +16,6 @@ export async function GET(request: NextRequest) {
 
   // Step 1: Get Google session
   const googleSession = await getServerSession(authOptions);
-
   if (!googleSession?.user?.email) {
     return NextResponse.redirect(
       new URL(`/election/${slug}/login`, request.url),
@@ -35,10 +34,12 @@ export async function GET(request: NextRequest) {
   // Step 3: Extract student ID from email
   const studentId = email.split("@")[0];
 
-  // Step 4: Get election by slug
+  // Step 4: Get election by slug — including session verification settings
   const { data: election } = await supabaseServer
     .from("elections")
-    .select("id, title, status, start_time, end_time")
+    .select(
+      "id, title, status, start_time, end_time, session_verification_enabled",
+    )
     .eq("slug", slug)
     .single();
 
@@ -79,7 +80,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Step 7: Create iron-session — works here because this is a Route Handler
+  // Step 7: Create iron-session
   const session = await getStudentSession();
   session.student_id = studentId;
   session.election_id = election.id;
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
   session.created_at = new Date().toISOString();
   await session.save();
 
-  // Step 8: Write audit log
+  // Step 8: Audit log
   await supabaseServer.from("audit_logs").insert({
     actor_type: "student",
     actor_id: studentId,
@@ -98,7 +99,14 @@ export async function GET(request: NextRequest) {
     ip_hash: getSafeIPHash(request),
   });
 
-  // Step 9: Redirect to ballot
+  // Step 9: Redirect — check if session verification is enabled
+  if (election.session_verification_enabled) {
+    return NextResponse.redirect(
+      new URL(`/election/${slug}/verify-session`, request.url),
+    );
+  }
+
+  // Session verification off — go straight to ballot
   return NextResponse.redirect(
     new URL(`/election/${slug}/ballot`, request.url),
   );

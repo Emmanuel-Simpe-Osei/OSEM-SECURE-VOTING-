@@ -23,6 +23,9 @@ interface VoterRow {
   full_name: string;
   department: string;
   level: string;
+  programme_session: string;
+  programme: string;
+  gender: string;
   valid: boolean;
   error?: string;
 }
@@ -40,6 +43,9 @@ interface RegisteredVoter {
   school_email: string;
   department: string | null;
   level: string | null;
+  programme_session: string | null;
+  programme: string | null;
+  gender: string | null;
   has_voted: boolean;
 }
 
@@ -62,32 +68,35 @@ export default function VotersPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
-  const fileRef = useRef<HTMLInputElement>(null);
   const online = useNetwork();
 
-  const [electionTitle, setElectionTitle] = useState("");
-  const [electionStatus, setElectionStatus] = useState("");
   const [registeredVoters, setRegisteredVoters] = useState<RegisteredVoter[]>(
     [],
   );
+  const [electionTitle, setElectionTitle] = useState("");
+  const [electionStatus, setElectionStatus] = useState("");
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // CSV upload state
   const [preview, setPreview] = useState<VoterRow[]>([]);
   const [fileName, setFileName] = useState("");
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [mounted, setMounted] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // Manual add
+  // Manual add state
   const [showManualForm, setShowManualForm] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
   const [manualForm, setManualForm] = useState({
     student_id: "",
     school_email: "",
     full_name: "",
     department: "",
     level: "",
+    programme_session: "",
   });
-  const [savingManual, setSavingManual] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -97,46 +106,44 @@ export default function VotersPage() {
   function showToast(type: "success" | "error", message: string) {
     const toastId = Date.now();
     setToasts((prev) => [...prev, { id: toastId, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== toastId));
-    }, 3500);
+    setTimeout(
+      () => setToasts((prev) => prev.filter((t) => t.id !== toastId)),
+      3500,
+    );
   }
 
   async function loadData() {
     try {
-      const res = await fetch(`/api/admin/elections/${id}`);
-      if (!res.ok) {
-        router.replace("/admin/dashboard");
+      const [electionRes, votersRes] = await Promise.all([
+        fetch(`/api/admin/elections/${id}`),
+        fetch(`/api/admin/voters/${id}`),
+      ]);
+      if (electionRes.status === 401) {
+        router.replace("/admin/login?error=session_expired");
         return;
       }
-      const data = await res.json();
-      setElectionTitle(data.election.title);
-      setElectionStatus(data.election.status);
-    } catch {
-      showToast("error", "Failed to load election data.");
-    }
+      const electionData = await electionRes.json();
+      setElectionTitle(electionData.election?.title || "");
+      setElectionStatus(electionData.election?.status || "");
 
-    try {
-      const res = await fetch(`/api/admin/voters/${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setRegisteredVoters(data.voters || []);
+      if (votersRes.ok) {
+        const votersData = await votersRes.json();
+        setRegisteredVoters(votersData.voters || []);
       }
-    } catch {}
-
-    setLoading(false);
+    } catch {
+      showToast("error", "Failed to load data.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  // ── Manual add ────────────────────────────────────────────────────
   async function handleManualAdd() {
     if (
       !manualForm.student_id ||
       !manualForm.school_email ||
       !manualForm.full_name
-    ) {
-      showToast("error", "Student ID, email and full name are required.");
+    )
       return;
-    }
     setSavingManual(true);
     try {
       const res = await fetch(`/api/admin/voters/upload`, {
@@ -151,6 +158,7 @@ export default function VotersPage() {
               full_name: manualForm.full_name.trim(),
               department: manualForm.department.trim() || null,
               level: manualForm.level.trim() || null,
+              programme_session: manualForm.programme_session.trim() || null,
             },
           ],
         }),
@@ -170,6 +178,7 @@ export default function VotersPage() {
           full_name: "",
           department: "",
           level: "",
+          programme_session: "",
         });
         setShowManualForm(false);
         loadData();
@@ -188,10 +197,12 @@ export default function VotersPage() {
       .split("\n")
       .filter((l) => l.trim());
     if (lines.length < 2) return [];
+
     const headers = lines[0]
       .toLowerCase()
       .split(",")
       .map((h) => h.trim().replace(/"/g, "").replace(/\r/g, ""));
+
     return lines
       .slice(1)
       .map((line) => {
@@ -202,46 +213,93 @@ export default function VotersPage() {
         headers.forEach((h, i) => {
           row[h] = values[i] || "";
         });
+
+        // Support UPSA raw export AND our own template
         const student_id =
           row["student_id"] ||
           row["studentid"] ||
+          row["index_number"] ||
+          row["index number"] ||
           row["id"] ||
           row["student id"] ||
           "";
-        const school_email =
+
+        // Auto-generate email from student ID if not provided
+        const raw_email =
           row["school_email"] || row["email"] || row["school email"] || "";
+        const school_email =
+          raw_email ||
+          (student_id ? `${student_id.toLowerCase()}@upsamail.edu.gh` : "");
+
+        // Support full_name column OR separate first/last/middle columns
         const full_name =
           row["full_name"] ||
           row["name"] ||
           row["fullname"] ||
           row["full name"] ||
+          [
+            row["first name"] || row["first_name"] || "",
+            row["middle name"] || row["middle_name"] || "",
+            row["last name"] || row["last_name"] || "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .trim() ||
           "";
+
         const department = row["department"] || row["dept"] || "";
+
         const level = row["level"] || row["year"] || "";
+
+        const programme =
+          row["programme"] || row["program"] || row["course"] || "";
+
+        const gender = (row["gender"] || row["sex"] || "").trim();
+
+        // Normalize session value
+        const raw_session = (
+          row["session"] ||
+          row["programme_session"] ||
+          row["programme session"] ||
+          ""
+        ).trim();
+
+        const sessionMap: Record<string, string> = {
+          morning: "Morning",
+          regular: "Morning",
+          day: "Morning",
+          evening: "Evening",
+          weekend: "Weekend",
+        };
+        const programme_session =
+          sessionMap[raw_session.toLowerCase()] || raw_session || "";
+
+        // Validation
         let valid = true;
         let error = "";
         if (!student_id) {
           valid = false;
           error = "Missing student ID";
-        } else if (!school_email) {
-          valid = false;
-          error = "Missing email";
-        } else if (!full_name) {
-          valid = false;
-          error = "Missing name";
         } else if (!school_email.includes("@")) {
           valid = false;
           error = "Invalid email";
+        } else if (!full_name) {
+          valid = false;
+          error = "Missing name";
         } else if (student_id.length < 3) {
           valid = false;
           error = "ID too short";
         }
+
         return {
           student_id,
           school_email,
           full_name,
           department,
           level,
+          programme_session,
+          programme,
+          gender,
           valid,
           error,
         };
@@ -293,6 +351,9 @@ export default function VotersPage() {
             full_name: r.full_name,
             department: r.department || null,
             level: r.level || null,
+            programme_session: r.programme_session || null,
+            programme: r.programme || null,
+            gender: r.gender || null,
           })),
         }),
       });
@@ -318,9 +379,10 @@ export default function VotersPage() {
 
   function downloadTemplate() {
     const csv = [
-      "student_id,school_email,full_name,department,level",
-      "10305844,10305844@upsamail.edu.gh,John Mensah,Business & Commerce,300",
-      "10348270,10348270@upsamail.edu.gh,Abena Asante,Business & Commerce,200",
+      "index_number,last_name,first_name,middle_name,level,programme,gender,session",
+      "10305844,MENSAH,JOHN,,300,BACHELOR OF BUSINESS ADMINISTRATION,Male,Morning",
+      "10348270,ASANTE,ABENA,,200,BSC MARKETING,Female,Evening",
+      "10011250,ADUM-YEBOAH,KOJO,,400,BSC MARKETING,Male,Weekend",
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -409,7 +471,7 @@ export default function VotersPage() {
       </div>
 
       {/* Network banner */}
-      {!online && (
+      {mounted && !online && (
         <div
           className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
           style={{ background: "#DC2626", color: "#ffffff" }}
@@ -628,6 +690,47 @@ export default function VotersPage() {
                           color: "#ffffff",
                         }}
                       />
+                      {/* Session selector */}
+                      <div className="col-span-2">
+                        <label
+                          className="block text-xs font-bold mb-2 uppercase tracking-wide"
+                          style={{ color: "rgba(255,255,255,0.4)" }}
+                        >
+                          Session (optional)
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {["Morning", "Evening", "Weekend"].map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() =>
+                                setManualForm((p) => ({
+                                  ...p,
+                                  programme_session:
+                                    p.programme_session === s ? "" : s,
+                                }))
+                              }
+                              className="py-2.5 rounded-xl text-xs font-bold transition-all"
+                              style={{
+                                background:
+                                  manualForm.programme_session === s
+                                    ? "rgba(249,168,37,0.2)"
+                                    : "rgba(255,255,255,0.05)",
+                                border:
+                                  manualForm.programme_session === s
+                                    ? "1px solid rgba(249,168,37,0.4)"
+                                    : "1px solid rgba(255,255,255,0.08)",
+                                color:
+                                  manualForm.programme_session === s
+                                    ? "#F9A825"
+                                    : "rgba(255,255,255,0.4)",
+                              }}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="flex gap-3">
                       <button
@@ -639,6 +742,7 @@ export default function VotersPage() {
                             full_name: "",
                             department: "",
                             level: "",
+                            programme_session: "",
                           });
                         }}
                         className="px-5 py-3 rounded-xl text-xs font-semibold transition-all active:scale-95"
@@ -704,13 +808,14 @@ export default function VotersPage() {
                       className="text-xs"
                       style={{ color: "rgba(255,255,255,0.4)" }}
                     >
-                      Required: student_id, school_email, full_name
+                      Supports UPSA export format directly
                     </p>
                     <p
                       className="text-xs mt-0.5"
                       style={{ color: "rgba(255,255,255,0.3)" }}
                     >
-                      Optional: department, level
+                      Columns: index_number, last_name, first_name, level,
+                      programme, gender, session
                     </p>
                   </div>
                   <button
@@ -831,7 +936,7 @@ export default function VotersPage() {
                             borderBottom: "1px solid rgba(255,255,255,0.06)",
                           }}
                         >
-                          {["Student ID", "Name", "Email", "Status"].map(
+                          {["Student ID", "Name", "Session", "Status"].map(
                             (h) => (
                               <th
                                 key={h}
@@ -870,10 +975,17 @@ export default function VotersPage() {
                             </td>
                             <td className="px-4 py-3">
                               <span
-                                className="text-xs"
-                                style={{ color: "rgba(255,255,255,0.4)" }}
+                                className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                                style={{
+                                  background: row.programme_session
+                                    ? "rgba(249,168,37,0.1)"
+                                    : "rgba(255,255,255,0.05)",
+                                  color: row.programme_session
+                                    ? "#F9A825"
+                                    : "rgba(255,255,255,0.3)",
+                                }}
                               >
-                                {row.school_email}
+                                {row.programme_session || "—"}
                               </span>
                             </td>
                             <td className="px-4 py-3">
@@ -1056,12 +1168,25 @@ export default function VotersPage() {
                         <p className="text-sm font-semibold text-white truncate">
                           {voter.full_name}
                         </p>
-                        <p
-                          className="text-xs mt-0.5 truncate"
-                          style={{ color: "rgba(255,255,255,0.4)" }}
-                        >
-                          {voter.student_id} · {voter.school_email}
-                        </p>
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          <p
+                            className="text-xs"
+                            style={{ color: "rgba(255,255,255,0.4)" }}
+                          >
+                            {voter.student_id}
+                          </p>
+                          {voter.programme_session && (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded-full"
+                              style={{
+                                background: "rgba(249,168,37,0.1)",
+                                color: "#F9A825",
+                              }}
+                            >
+                              {voter.programme_session}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span
                         className="text-xs font-bold px-2.5 py-1 rounded-full shrink-0"

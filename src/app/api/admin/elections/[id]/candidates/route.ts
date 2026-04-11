@@ -41,7 +41,6 @@ export async function POST(
       .select("id, name, description, max_votes, sort_order")
       .single();
     if (error) {
-      console.error("[candidates POST position]", error);
       return NextResponse.json(
         { error: "Failed to add position." },
         { status: 500 },
@@ -78,7 +77,6 @@ export async function POST(
       .select("id, full_name, bio, photo_url, sort_order")
       .single();
     if (error) {
-      console.error("[candidates POST candidate]", error);
       return NextResponse.json(
         { error: "Failed to add candidate." },
         { status: 500 },
@@ -99,6 +97,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
+  const { id: electionId } = await params;
   const body = await request.json();
 
   if (body.type === "position_order") {
@@ -113,6 +112,77 @@ export async function PATCH(
       );
     }
     return NextResponse.json({ success: true });
+  }
+
+  if (body.type === "candidate_edit") {
+    // Block edits if election is active or beyond
+    const { data: election } = await supabaseServer
+      .from("elections")
+      .select("status")
+      .eq("id", electionId)
+      .single();
+
+    if (!election) {
+      return NextResponse.json(
+        { error: "Election not found." },
+        { status: 404 },
+      );
+    }
+
+    const lockedStatuses = ["active", "paused", "closed", "archived"];
+    if (lockedStatuses.includes(election.status)) {
+      return NextResponse.json(
+        { error: "Candidates cannot be edited after voting has started." },
+        { status: 403 },
+      );
+    }
+
+    const schema = z.object({
+      candidate_id: z.string(),
+      full_name: z.string().min(1).max(200),
+      bio: z.string().nullable().optional(),
+      photo_url: z.string().nullable().optional(),
+    });
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid candidate data." },
+        { status: 400 },
+      );
+    }
+
+    const { data, error } = await supabaseServer
+      .from("candidates")
+      .update({
+        full_name: parsed.data.full_name,
+        bio: parsed.data.bio ?? null,
+        photo_url: parsed.data.photo_url ?? null,
+      })
+      .eq("id", parsed.data.candidate_id)
+      .select("id, full_name, bio, photo_url, sort_order")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: "Failed to update candidate." },
+        { status: 500 },
+      );
+    }
+
+    // Audit log
+    await supabaseServer.from("audit_logs").insert({
+      actor_type: "admin",
+      actor_id: session.admin_id,
+      action: "candidate_edited",
+      target_type: "candidate",
+      target_id: parsed.data.candidate_id,
+      metadata: {
+        election_id: electionId,
+        full_name: parsed.data.full_name,
+      },
+    });
+
+    return NextResponse.json(data);
   }
 
   return NextResponse.json({ error: "Invalid type." }, { status: 400 });

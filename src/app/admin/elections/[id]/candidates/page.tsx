@@ -1,6 +1,5 @@
 "use client";
-
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ShieldCheck,
@@ -16,6 +15,7 @@ import {
   ChevronDown,
   WifiOff,
   CheckCircle2,
+  Pencil,
 } from "lucide-react";
 
 interface Candidate {
@@ -48,16 +48,27 @@ interface ConfirmDialog {
   onConfirm: () => void;
 }
 
+interface EditForm {
+  candidateId: string | null;
+  positionId: string | null;
+  full_name: string;
+  bio: string;
+  photo_file: File | null;
+  photo_preview: string;
+  existing_photo_url: string | null;
+  photoKey: number;
+}
+
 function useNetwork() {
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [online, setOnline] = useState(true);
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
     return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
     };
   }, []);
   return online;
@@ -71,9 +82,11 @@ export default function CandidatesPage() {
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [electionTitle, setElectionTitle] = useState("");
+  const [electionStatus, setElectionStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [mounted, setMounted] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmDialog>({
     open: false,
     title: "",
@@ -90,7 +103,7 @@ export default function CandidatesPage() {
   });
   const [savingPosition, setSavingPosition] = useState(false);
 
-  // Candidate form
+  // Add candidate form
   const [candidateForm, setCandidateForm] = useState<{
     positionId: string | null;
     full_name: string;
@@ -108,7 +121,24 @@ export default function CandidatesPage() {
   });
   const [savingCandidate, setSavingCandidate] = useState(false);
 
-  // ── Toast system ──────────────────────────────────────────────────
+  // Edit candidate form
+  const [editForm, setEditForm] = useState<EditForm>({
+    candidateId: null,
+    positionId: null,
+    full_name: "",
+    bio: "",
+    photo_file: null,
+    photo_preview: "",
+    existing_photo_url: null,
+    photoKey: 0,
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  useEffect(() => {
+    loadData();
+    setTimeout(() => setMounted(true), 50);
+  }, []);
+
   function showToast(type: "success" | "error", message: string) {
     const toastId = Date.now();
     setToasts((prev) => [...prev, { id: toastId, type, message }]);
@@ -117,7 +147,6 @@ export default function CandidatesPage() {
     }, 3500);
   }
 
-  // ── Confirm dialog ────────────────────────────────────────────────
   function showConfirm(title: string, message: string, onConfirm: () => void) {
     setConfirm({ open: true, title, message, onConfirm });
   }
@@ -125,10 +154,6 @@ export default function CandidatesPage() {
   function closeConfirm() {
     setConfirm({ open: false, title: "", message: "", onConfirm: () => {} });
   }
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   async function loadData() {
     try {
@@ -139,6 +164,7 @@ export default function CandidatesPage() {
       }
       const data = await res.json();
       setElectionTitle(data.election.title);
+      setElectionStatus(data.election.status);
       setPositions(
         (data.positions || []).sort(
           (a: Position, b: Position) => a.sort_order - b.sort_order,
@@ -150,6 +176,10 @@ export default function CandidatesPage() {
       setLoading(false);
     }
   }
+
+  const isLocked = ["active", "paused", "closed", "archived"].includes(
+    electionStatus,
+  );
 
   // ── Reorder positions ─────────────────────────────────────────────
   async function movePosition(positionId: string, direction: "up" | "down") {
@@ -221,7 +251,7 @@ export default function CandidatesPage() {
     }
   }
 
-  // ── Candidate form helpers ────────────────────────────────────────
+  // ── Add candidate helpers ─────────────────────────────────────────
   function openCandidateForm(positionId: string) {
     if (candidateForm.photo_preview)
       URL.revokeObjectURL(candidateForm.photo_preview);
@@ -249,7 +279,10 @@ export default function CandidatesPage() {
     }));
   }
 
-  function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  function handlePhotoSelect(
+    e: React.ChangeEvent<HTMLInputElement>,
+    mode: "add" | "edit",
+  ) {
     const file = e.target.files?.[0];
     if (!file) return;
     const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
@@ -261,40 +294,54 @@ export default function CandidatesPage() {
       showToast("error", "Photo must be under 2MB.");
       return;
     }
-    if (candidateForm.photo_preview)
-      URL.revokeObjectURL(candidateForm.photo_preview);
     const preview = URL.createObjectURL(file);
-    setCandidateForm((prev) => ({
-      ...prev,
-      photo_file: file,
-      photo_preview: preview,
-    }));
+    if (mode === "add") {
+      if (candidateForm.photo_preview)
+        URL.revokeObjectURL(candidateForm.photo_preview);
+      setCandidateForm((prev) => ({
+        ...prev,
+        photo_file: file,
+        photo_preview: preview,
+      }));
+    } else {
+      if (editForm.photo_preview) URL.revokeObjectURL(editForm.photo_preview);
+      setEditForm((prev) => ({
+        ...prev,
+        photo_file: file,
+        photo_preview: preview,
+      }));
+    }
+  }
+
+  async function uploadPhoto(file: File): Promise<string | null> {
+    const uploadRes = await fetch(
+      `/api/admin/elections/${id}/candidates/upload-photo`,
+      {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      },
+    );
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok) {
+      showToast("error", uploadData.error || "Failed to upload photo.");
+      return null;
+    }
+    return uploadData.url;
   }
 
   // ── Add candidate ─────────────────────────────────────────────────
   async function addCandidate(positionId: string) {
     if (!candidateForm.full_name.trim()) return;
     setSavingCandidate(true);
-
     try {
       let photo_url = null;
-
       if (candidateForm.photo_file) {
-        const uploadRes = await fetch(
-          `/api/admin/elections/${id}/candidates/upload-photo`,
-          {
-            method: "POST",
-            headers: { "Content-Type": candidateForm.photo_file.type },
-            body: candidateForm.photo_file,
-          },
-        );
-        const uploadData = await uploadRes.json();
-        if (!uploadRes.ok) {
-          showToast("error", uploadData.error || "Failed to upload photo.");
+        photo_url = await uploadPhoto(candidateForm.photo_file);
+        if (!photo_url) {
           setSavingCandidate(false);
           return;
         }
-        photo_url = uploadData.url;
       }
 
       const position = positions.find((p) => p.id === positionId);
@@ -330,6 +377,91 @@ export default function CandidatesPage() {
       showToast("error", "Network error. Please try again.");
     } finally {
       setSavingCandidate(false);
+    }
+  }
+
+  // ── Edit candidate ────────────────────────────────────────────────
+  function openEditForm(candidate: Candidate, positionId: string) {
+    if (editForm.photo_preview) URL.revokeObjectURL(editForm.photo_preview);
+    setEditForm({
+      candidateId: candidate.id,
+      positionId,
+      full_name: candidate.full_name,
+      bio: candidate.bio || "",
+      photo_file: null,
+      photo_preview: "",
+      existing_photo_url: candidate.photo_url,
+      photoKey: editForm.photoKey + 1,
+    });
+    // Close add form if open
+    closeCandidateForm();
+  }
+
+  function closeEditForm() {
+    if (editForm.photo_preview) URL.revokeObjectURL(editForm.photo_preview);
+    setEditForm({
+      candidateId: null,
+      positionId: null,
+      full_name: "",
+      bio: "",
+      photo_file: null,
+      photo_preview: "",
+      existing_photo_url: null,
+      photoKey: editForm.photoKey + 1,
+    });
+  }
+
+  async function saveEdit() {
+    if (!editForm.full_name.trim() || !editForm.candidateId) return;
+    setSavingEdit(true);
+    try {
+      let photo_url = editForm.existing_photo_url;
+
+      if (editForm.photo_file) {
+        const uploaded = await uploadPhoto(editForm.photo_file);
+        if (!uploaded) {
+          setSavingEdit(false);
+          return;
+        }
+        photo_url = uploaded;
+      }
+
+      const res = await fetch(`/api/admin/elections/${id}/candidates`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "candidate_edit",
+          candidate_id: editForm.candidateId,
+          full_name: editForm.full_name.trim(),
+          bio: editForm.bio.trim() || null,
+          photo_url,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showToast("error", data.error || "Failed to update candidate.");
+        return;
+      }
+
+      setPositions((prev) =>
+        prev.map((p) =>
+          p.id === editForm.positionId
+            ? {
+                ...p,
+                candidates: p.candidates.map((c) =>
+                  c.id === editForm.candidateId ? { ...c, ...data } : c,
+                ),
+              }
+            : p,
+        ),
+      );
+      closeEditForm();
+      showToast("success", `${data.full_name} updated successfully.`);
+    } catch {
+      showToast("error", "Network error. Please try again.");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -406,7 +538,6 @@ export default function CandidatesPage() {
     );
   }
 
-  // ── Loading ───────────────────────────────────────────────────────
   if (loading) {
     return (
       <div
@@ -445,7 +576,11 @@ export default function CandidatesPage() {
                 toast.type === "success"
                   ? "rgba(22,163,74,0.95)"
                   : "rgba(220,38,38,0.95)",
-              border: `1px solid ${toast.type === "success" ? "rgba(74,222,128,0.3)" : "rgba(252,165,165,0.3)"}`,
+              border: `1px solid ${
+                toast.type === "success"
+                  ? "rgba(74,222,128,0.3)"
+                  : "rgba(252,165,165,0.3)"
+              }`,
               backdropFilter: "blur(12px)",
               animation: "slideIn 0.2s ease forwards",
               minWidth: "260px",
@@ -506,6 +641,184 @@ export default function CandidatesPage() {
         </div>
       )}
 
+      {/* Edit candidate modal */}
+      {editForm.candidateId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl p-6 space-y-4"
+            style={{
+              background: "#0F2540",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-white">Edit Candidate</p>
+              <button
+                onClick={closeEditForm}
+                className="w-7 h-7 rounded-xl flex items-center justify-center transition-all active:scale-90"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+              >
+                <X
+                  className="w-3.5 h-3.5"
+                  style={{ color: "rgba(255,255,255,0.6)" }}
+                />
+              </button>
+            </div>
+
+            {/* Photo */}
+            <div className="flex items-center gap-4">
+              <div className="relative shrink-0">
+                {editForm.photo_preview || editForm.existing_photo_url ? (
+                  <>
+                    <img
+                      src={
+                        editForm.photo_preview || editForm.existing_photo_url!
+                      }
+                      alt="Preview"
+                      className="w-16 h-20 rounded-xl object-cover object-top"
+                    />
+                    <label
+                      className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center cursor-pointer transition-all hover:opacity-80"
+                      style={{ background: "rgba(249,168,37,0.9)" }}
+                    >
+                      <Pencil
+                        className="w-3 h-3"
+                        style={{ color: "#000913" }}
+                      />
+                      <input
+                        key={editForm.photoKey}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => handlePhotoSelect(e, "edit")}
+                        className="hidden"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label
+                    className="w-16 h-20 rounded-xl flex flex-col items-center justify-center shrink-0 cursor-pointer transition-all hover:opacity-70 gap-1"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "2px dashed rgba(255,255,255,0.15)",
+                    }}
+                  >
+                    <Upload
+                      className="w-4 h-4"
+                      style={{ color: "rgba(255,255,255,0.4)" }}
+                    />
+                    <span
+                      className="text-xs"
+                      style={{
+                        color: "rgba(255,255,255,0.3)",
+                        fontSize: "9px",
+                      }}
+                    >
+                      Upload
+                    </span>
+                    <input
+                      key={editForm.photoKey}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => handlePhotoSelect(e, "edit")}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+              <div>
+                <p
+                  className="text-xs font-medium"
+                  style={{ color: "rgba(255,255,255,0.6)" }}
+                >
+                  {editForm.photo_preview
+                    ? "New photo selected ✓"
+                    : editForm.existing_photo_url
+                      ? "Tap pencil to change photo"
+                      : "Upload passport photo"}
+                </p>
+                <p
+                  className="text-xs mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.3)" }}
+                >
+                  JPG, PNG, WebP · Max 2MB
+                </p>
+              </div>
+            </div>
+
+            {/* Name */}
+            <input
+              type="text"
+              value={editForm.full_name}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, full_name: e.target.value }))
+              }
+              placeholder="Full name *"
+              autoFocus
+              className="w-full px-3.5 py-3 rounded-xl text-sm outline-none"
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#ffffff",
+              }}
+            />
+
+            {/* Bio */}
+            <input
+              type="text"
+              value={editForm.bio}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, bio: e.target.value }))
+              }
+              placeholder="Short bio (optional)"
+              className="w-full px-3.5 py-3 rounded-xl text-sm outline-none"
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#ffffff",
+              }}
+            />
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={closeEditForm}
+                className="px-4 py-3 rounded-2xl text-xs font-semibold transition-all active:scale-95"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.5)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={savingEdit || !editForm.full_name.trim()}
+                className="flex-1 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-all active:scale-95"
+                style={{
+                  background: "linear-gradient(135deg, #F9A825, #E65100)",
+                  color: "#0B1E35",
+                }}
+              >
+                {savingEdit ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes slideIn {
           from { opacity: 0; transform: translateX(20px); }
@@ -514,7 +827,7 @@ export default function CandidatesPage() {
       `}</style>
 
       {/* Network banner */}
-      {!online && (
+      {mounted && !online && (
         <div
           className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
           style={{ background: "#DC2626", color: "#ffffff" }}
@@ -586,22 +899,42 @@ export default function CandidatesPage() {
             </p>
           </div>
 
-          <div
-            className="rounded-2xl px-4 py-3 mb-6"
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
-              Use{" "}
-              <span className="font-bold" style={{ color: "#F9A825" }}>
-                ↑ ↓
-              </span>{" "}
-              to reorder positions. Students see them in this exact order on the
-              ballot.
-            </p>
-          </div>
+          {/* Locked banner */}
+          {isLocked ? (
+            <div
+              className="rounded-2xl px-4 py-3 mb-6 flex items-center gap-2"
+              style={{
+                background: "rgba(248,113,113,0.08)",
+                border: "1px solid rgba(248,113,113,0.2)",
+              }}
+            >
+              <AlertCircle
+                className="w-3.5 h-3.5 shrink-0"
+                style={{ color: "#F87171" }}
+              />
+              <p className="text-xs" style={{ color: "#F87171" }}>
+                Voting has started — candidates are locked. No changes can be
+                made.
+              </p>
+            </div>
+          ) : (
+            <div
+              className="rounded-2xl px-4 py-3 mb-6"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+                Use{" "}
+                <span className="font-bold" style={{ color: "#F9A825" }}>
+                  ↑ ↓
+                </span>{" "}
+                to reorder positions. Students see them in this exact order on
+                the ballot.
+              </p>
+            </div>
+          )}
 
           {/* Positions */}
           <div className="space-y-5 mb-6">
@@ -624,7 +957,7 @@ export default function CandidatesPage() {
                     <button
                       type="button"
                       onClick={() => movePosition(position.id, "up")}
-                      disabled={idx === 0 || !!saving}
+                      disabled={idx === 0 || !!saving || isLocked}
                       className="w-6 h-6 rounded-lg flex items-center justify-center transition-all disabled:opacity-20 hover:opacity-70"
                       style={{ background: "rgba(255,255,255,0.08)" }}
                     >
@@ -636,7 +969,9 @@ export default function CandidatesPage() {
                     <button
                       type="button"
                       onClick={() => movePosition(position.id, "down")}
-                      disabled={idx === positions.length - 1 || !!saving}
+                      disabled={
+                        idx === positions.length - 1 || !!saving || isLocked
+                      }
                       className="w-6 h-6 rounded-lg flex items-center justify-center transition-all disabled:opacity-20 hover:opacity-70"
                       style={{ background: "rgba(255,255,255,0.08)" }}
                     >
@@ -677,15 +1012,17 @@ export default function CandidatesPage() {
                     </p>
                   </div>
 
-                  {/* Delete */}
-                  <button
-                    type="button"
-                    onClick={() => confirmDeletePosition(position)}
-                    className="p-1.5 rounded-lg transition-all hover:opacity-60 shrink-0"
-                    style={{ color: "rgba(255,255,255,0.3)" }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Delete — only when unlocked */}
+                  {!isLocked && (
+                    <button
+                      type="button"
+                      onClick={() => confirmDeletePosition(position)}
+                      className="p-1.5 rounded-lg transition-all hover:opacity-60 shrink-0"
+                      style={{ color: "rgba(255,255,255,0.3)" }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Candidates grid */}
@@ -700,7 +1037,7 @@ export default function CandidatesPage() {
                           border: "1px solid rgba(255,255,255,0.08)",
                         }}
                       >
-                        {/* Full photo */}
+                        {/* Photo */}
                         <div
                           className="w-full overflow-hidden"
                           style={{
@@ -714,7 +1051,6 @@ export default function CandidatesPage() {
                               src={candidate.photo_url}
                               alt={candidate.full_name}
                               className="w-full h-full object-cover object-top"
-                              style={{ imageRendering: "auto" }}
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
@@ -741,25 +1077,48 @@ export default function CandidatesPage() {
                           </p>
                         </div>
 
-                        {/* Delete on hover */}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            confirmDeleteCandidate(position.id, candidate)
-                          }
-                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all active:scale-90"
-                          style={{
-                            background: "rgba(220,38,38,0.9)",
-                            backdropFilter: "blur(4px)",
-                          }}
-                        >
-                          <X className="w-3 h-3 text-white" />
-                        </button>
+                        {/* Hover actions — only when unlocked */}
+                        {!isLocked && (
+                          <>
+                            {/* Edit button */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openEditForm(candidate, position.id)
+                              }
+                              className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all active:scale-90"
+                              style={{
+                                background: "rgba(249,168,37,0.9)",
+                                backdropFilter: "blur(4px)",
+                              }}
+                            >
+                              <Pencil
+                                className="w-3 h-3"
+                                style={{ color: "#000913" }}
+                              />
+                            </button>
+
+                            {/* Delete button */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                confirmDeleteCandidate(position.id, candidate)
+                              }
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all active:scale-90"
+                              style={{
+                                background: "rgba(220,38,38,0.9)",
+                                backdropFilter: "blur(4px)",
+                              }}
+                            >
+                              <X className="w-3 h-3 text-white" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     ))}
 
-                    {/* Add card */}
-                    {candidateForm.positionId !== position.id && (
+                    {/* Add card — only when unlocked */}
+                    {!isLocked && candidateForm.positionId !== position.id && (
                       <button
                         type="button"
                         onClick={() => openCandidateForm(position.id)}
@@ -785,8 +1144,8 @@ export default function CandidatesPage() {
                     )}
                   </div>
 
-                  {/* Candidate form */}
-                  {candidateForm.positionId === position.id && (
+                  {/* Add candidate form */}
+                  {!isLocked && candidateForm.positionId === position.id && (
                     <div
                       className="rounded-2xl p-4 space-y-3 mt-2"
                       style={{
@@ -854,7 +1213,7 @@ export default function CandidatesPage() {
                               key={candidateForm.photoKey}
                               type="file"
                               accept="image/jpeg,image/png,image/webp"
-                              onChange={handlePhotoSelect}
+                              onChange={(e) => handlePhotoSelect(e, "add")}
                               className="hidden"
                             />
                           </label>
@@ -960,129 +1319,133 @@ export default function CandidatesPage() {
             ))}
           </div>
 
-          {/* Add position form */}
-          {showPositionForm ? (
-            <div
-              className="rounded-2xl p-6 space-y-4"
-              style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(249,168,37,0.3)",
-              }}
-            >
-              <h3 className="text-sm font-bold text-white">New Position</h3>
-              <input
-                type="text"
-                value={positionForm.name}
-                onChange={(e) =>
-                  setPositionForm((prev) => ({ ...prev, name: e.target.value }))
-                }
-                placeholder="Position name (e.g. President) *"
-                autoFocus
-                className="w-full px-4 py-3.5 rounded-xl text-sm outline-none"
+          {/* Add position — only when unlocked */}
+          {!isLocked &&
+            (showPositionForm ? (
+              <div
+                className="rounded-2xl p-6 space-y-4"
                 style={{
-                  background: "rgba(255,255,255,0.07)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "#ffffff",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(249,168,37,0.3)",
                 }}
-              />
-              <input
-                type="text"
-                value={positionForm.description}
-                onChange={(e) =>
-                  setPositionForm((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                placeholder="Description (optional)"
-                className="w-full px-4 py-3.5 rounded-xl text-sm outline-none"
-                style={{
-                  background: "rgba(255,255,255,0.07)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "#ffffff",
-                }}
-              />
-              <div>
-                <label
-                  className="block text-xs font-bold mb-2 uppercase tracking-wide"
-                  style={{ color: "rgba(255,255,255,0.5)" }}
-                >
-                  Max votes per student
-                </label>
-                <select
-                  value={positionForm.max_votes}
+              >
+                <h3 className="text-sm font-bold text-white">New Position</h3>
+                <input
+                  type="text"
+                  value={positionForm.name}
                   onChange={(e) =>
                     setPositionForm((prev) => ({
                       ...prev,
-                      max_votes: parseInt(e.target.value),
+                      name: e.target.value,
                     }))
                   }
+                  placeholder="Position name (e.g. President) *"
+                  autoFocus
                   className="w-full px-4 py-3.5 rounded-xl text-sm outline-none"
                   style={{
                     background: "rgba(255,255,255,0.07)",
                     border: "1px solid rgba(255,255,255,0.1)",
                     color: "#ffffff",
-                    colorScheme: "dark",
                   }}
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPositionForm(false);
-                    setPositionForm({
-                      name: "",
-                      description: "",
-                      max_votes: 1,
-                    });
-                  }}
-                  className="px-5 py-3 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                />
+                <input
+                  type="text"
+                  value={positionForm.description}
+                  onChange={(e) =>
+                    setPositionForm((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  placeholder="Description (optional)"
+                  className="w-full px-4 py-3.5 rounded-xl text-sm outline-none"
                   style={{
-                    background: "rgba(255,255,255,0.05)",
-                    color: "rgba(255,255,255,0.5)",
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#ffffff",
                   }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={addPosition}
-                  disabled={savingPosition || !positionForm.name.trim()}
-                  className="flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-all active:scale-95"
-                  style={{
-                    background: "linear-gradient(135deg, #F9A825, #E65100)",
-                    color: "#0B1E35",
-                  }}
-                >
-                  {savingPosition ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : null}
-                  Add Position
-                </button>
+                />
+                <div>
+                  <label
+                    className="block text-xs font-bold mb-2 uppercase tracking-wide"
+                    style={{ color: "rgba(255,255,255,0.5)" }}
+                  >
+                    Max votes per student
+                  </label>
+                  <select
+                    value={positionForm.max_votes}
+                    onChange={(e) =>
+                      setPositionForm((prev) => ({
+                        ...prev,
+                        max_votes: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full px-4 py-3.5 rounded-xl text-sm outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "#ffffff",
+                      colorScheme: "dark",
+                    }}
+                  >
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPositionForm(false);
+                      setPositionForm({
+                        name: "",
+                        description: "",
+                        max_votes: 1,
+                      });
+                    }}
+                    className="px-5 py-3 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      color: "rgba(255,255,255,0.5)",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addPosition}
+                    disabled={savingPosition || !positionForm.name.trim()}
+                    className="flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-all active:scale-95"
+                    style={{
+                      background: "linear-gradient(135deg, #F9A825, #E65100)",
+                      color: "#0B1E35",
+                    }}
+                  >
+                    {savingPosition ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : null}
+                    Add Position
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowPositionForm(true)}
-              className="w-full py-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
-              style={{
-                background: "rgba(249,168,37,0.08)",
-                border: "1.5px dashed rgba(249,168,37,0.4)",
-                color: "#F9A825",
-              }}
-            >
-              <Plus className="w-4 h-4" />
-              Add Position
-            </button>
-          )}
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowPositionForm(true)}
+                className="w-full py-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
+                style={{
+                  background: "rgba(249,168,37,0.08)",
+                  border: "1.5px dashed rgba(249,168,37,0.4)",
+                  color: "#F9A825",
+                }}
+              >
+                <Plus className="w-4 h-4" />
+                Add Position
+              </button>
+            ))}
         </div>
       </div>
 

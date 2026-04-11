@@ -2,11 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/db/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { generateToken } from "@/lib/security/hash";
+import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
+  const returnedState = searchParams.get("state");
+
+  // Verify state
+  const cookieStore = await cookies();
+  const storedState = cookieStore.get("oauth_state")?.value;
+  cookieStore.delete("oauth_state");
+
+  if (!storedState || storedState !== returnedState) {
+    return NextResponse.redirect(
+      new URL("/admin/login?error=invalid_state", request.url),
+    );
+  }
 
   if (error || !code) {
     return NextResponse.redirect(

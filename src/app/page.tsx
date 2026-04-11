@@ -632,7 +632,9 @@ export default function LandingPage() {
             >
               Built for organizations that
               <br />
-              <span className="shimmer-text">can not afford mistakes.</span>
+              <span className="shimmer-text">
+                can not afford mistakes. strong and secure.
+              </span>
             </h2>
           </div>
 

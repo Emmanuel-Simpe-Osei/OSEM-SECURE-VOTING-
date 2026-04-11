@@ -21,6 +21,7 @@ import {
   WifiOff,
   Headphones,
   ClipboardCheck,
+  Layers,
 } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/utils/time";
 
@@ -93,6 +94,13 @@ export default function ElectionDetailPage() {
   const [savingSession, setSavingSession] = useState(false);
   const [sessionSaved, setSessionSaved] = useState(false);
 
+  // Duplicate modal state
+  const [showDuplicate, setShowDuplicate] = useState(false);
+  const [duplicateTitle, setDuplicateTitle] = useState("");
+  const [duplicateSlug, setDuplicateSlug] = useState("");
+  const [duplicating, setDuplicating] = useState(false);
+  const [duplicateError, setDuplicateError] = useState("");
+
   // Eligibility check state
   const [eligibilityEnabled, setEligibilityEnabled] = useState(false);
   const [eligibilityOpenFrom, setEligibilityOpenFrom] = useState("");
@@ -133,7 +141,6 @@ export default function ElectionDetailPage() {
       );
       setEligibilityEnabled(data.election.eligibility_check_enabled || false);
       if (data.election.eligibility_check_open_from) {
-        // Convert to local datetime-local format
         const d = new Date(data.election.eligibility_check_open_from);
         const pad = (n: number) => String(n).padStart(2, "0");
         setEligibilityOpenFrom(
@@ -205,6 +212,7 @@ export default function ElectionDetailPage() {
         setTimeout(() => setSessionSaved(false), 2500);
       }
     } catch {
+      // non-blocking
     } finally {
       setSavingSession(false);
     }
@@ -230,8 +238,43 @@ export default function ElectionDetailPage() {
         setTimeout(() => setEligibilitySaved(false), 2500);
       }
     } catch {
+      // non-blocking
     } finally {
       setSavingEligibility(false);
+    }
+  }
+
+  function openDuplicateModal() {
+    setDuplicateTitle(`${election?.title} (Copy)`);
+    setDuplicateSlug((election?.slug || "") + "-copy");
+    setDuplicateError("");
+    setShowDuplicate(true);
+  }
+
+  async function handleDuplicate() {
+    if (!duplicateTitle.trim() || !duplicateSlug.trim()) return;
+    setDuplicating(true);
+    setDuplicateError("");
+    try {
+      const res = await fetch(`/api/admin/elections/${id}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: duplicateTitle.trim(),
+          slug: duplicateSlug.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDuplicateError(data.error || "Failed to duplicate.");
+        return;
+      }
+      setShowDuplicate(false);
+      router.push(`/admin/elections/${data.id}`);
+    } catch {
+      setDuplicateError("Network error. Please try again.");
+    } finally {
+      setDuplicating(false);
     }
   }
 
@@ -350,8 +393,161 @@ export default function ElectionDetailPage() {
         }
       `}</style>
 
+      {/* Duplicate modal */}
+      {showDuplicate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl p-6 space-y-4"
+            style={{
+              background: "#0F2540",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4" style={{ color: "#A78BFA" }} />
+                <p className="text-sm font-bold text-white">
+                  Duplicate Election
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDuplicate(false)}
+                className="w-7 h-7 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+              >
+                <X
+                  className="w-3.5 h-3.5"
+                  style={{ color: "rgba(255,255,255,0.5)" }}
+                />
+              </button>
+            </div>
+
+            <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+              Creates a new draft with the same positions and candidates. Voter
+              list is not copied.
+            </p>
+
+            {duplicateError && (
+              <div
+                className="rounded-2xl p-3 flex items-start gap-2"
+                style={{
+                  background: "rgba(220,38,38,0.15)",
+                  border: "1px solid rgba(220,38,38,0.3)",
+                }}
+              >
+                <AlertTriangle
+                  className="w-3.5 h-3.5 shrink-0 mt-0.5"
+                  style={{ color: "#F87171" }}
+                />
+                <p className="text-xs" style={{ color: "#F87171" }}>
+                  {duplicateError}
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label
+                  className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  New Title
+                </label>
+                <input
+                  type="text"
+                  value={duplicateTitle}
+                  onChange={(e) => {
+                    setDuplicateTitle(e.target.value);
+                    const slug = e.target.value
+                      .toLowerCase()
+                      .replace(/[^a-z0-9\s-]/g, "")
+                      .replace(/\s+/g, "-")
+                      .replace(/-+/g, "-")
+                      .trim();
+                    setDuplicateSlug(slug);
+                  }}
+                  className="w-full px-3.5 py-3 rounded-xl text-sm outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#ffffff",
+                  }}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  URL Slug
+                </label>
+                <input
+                  type="text"
+                  value={duplicateSlug}
+                  onChange={(e) =>
+                    setDuplicateSlug(
+                      e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+                    )
+                  }
+                  className="w-full px-3.5 py-3 rounded-xl text-sm outline-none font-mono"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#F9A825",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDuplicate(false)}
+                className="px-4 py-3 rounded-2xl text-xs font-semibold transition-all active:scale-95"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.5)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDuplicate}
+                disabled={
+                  duplicating || !duplicateTitle.trim() || !duplicateSlug.trim()
+                }
+                className="flex-1 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                style={{
+                  background: "rgba(167,139,250,0.2)",
+                  color: "#A78BFA",
+                  border: "1px solid rgba(167,139,250,0.3)",
+                }}
+              >
+                {duplicating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Duplicating...
+                  </>
+                ) : (
+                  <>
+                    <Layers className="w-3.5 h-3.5" />
+                    Duplicate Election
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Network banner */}
-      {!online && (
+      {mounted && !online && (
         <div
           className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
           style={{ background: "#DC2626", color: "#ffffff" }}
@@ -704,6 +900,20 @@ export default function ElectionDetailPage() {
                   Add candidates and voters before opening voting.
                 </p>
               )}
+
+              {/* Duplicate — available on any status */}
+              <button
+                onClick={openDuplicateModal}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
+                style={{
+                  background: "rgba(167,139,250,0.12)",
+                  color: "#A78BFA",
+                  border: "1px solid rgba(167,139,250,0.25)",
+                }}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Duplicate
+              </button>
             </div>
           </div>
 
@@ -1112,7 +1322,7 @@ export default function ElectionDetailPage() {
             </button>
           </div>
 
-          {/* ── Eligibility Check Toggle ── */}
+          {/* Eligibility Check Toggle */}
           <div
             className="rounded-2xl p-5 mb-4"
             style={{
@@ -1126,7 +1336,6 @@ export default function ElectionDetailPage() {
               transition: "opacity 0.4s ease 0.42s",
             }}
           >
-            {/* Header row */}
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="text-sm font-bold text-white">
@@ -1161,7 +1370,6 @@ export default function ElectionDetailPage() {
 
             {eligibilityEnabled && (
               <div className="mt-2 space-y-4">
-                {/* Open from date */}
                 <div>
                   <label
                     className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -1190,7 +1398,6 @@ export default function ElectionDetailPage() {
                   </p>
                 </div>
 
-                {/* Stats */}
                 {eligibilityStats && eligibilityStats.total > 0 && (
                   <div
                     className="rounded-2xl p-4"
@@ -1242,7 +1449,6 @@ export default function ElectionDetailPage() {
                   </div>
                 )}
 
-                {/* Eligibility URL */}
                 <div>
                   <p
                     className="text-xs font-bold mb-2 uppercase tracking-wide"

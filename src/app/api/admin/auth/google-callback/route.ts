@@ -10,7 +10,6 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get("error");
   const returnedState = searchParams.get("state");
 
-  // Verify state
   const cookieStore = await cookies();
   const storedState = cookieStore.get("oauth_state")?.value;
   cookieStore.delete("oauth_state");
@@ -28,7 +27,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const redirectUri = `${process.env.APP_BASE_URL}/api/admin/auth/google-callback`;
+    const origin = request.nextUrl.origin;
+    const redirectUri = `${origin}/api/admin/auth/google-callback`;
 
     // Exchange code for tokens
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get user info
+    // Get user info from Google
     const userRes = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {

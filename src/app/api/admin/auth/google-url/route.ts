@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID!;
-  const redirectUri = `${process.env.APP_BASE_URL}/api/admin/auth/google-callback`;
+  const origin = request.nextUrl.origin;
+  const redirectUri = `${origin}/api/admin/auth/google-callback`;
 
   const state = crypto.randomBytes(16).toString("hex");
   const cookieStore = await cookies();

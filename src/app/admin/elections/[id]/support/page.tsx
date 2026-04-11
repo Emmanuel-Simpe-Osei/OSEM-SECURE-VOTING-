@@ -15,6 +15,8 @@ import {
   Key,
   Edit3,
   X,
+  RefreshCw,
+  ClipboardX,
 } from "lucide-react";
 
 interface Voter {
@@ -28,6 +30,11 @@ interface Voter {
   eligible: boolean;
 }
 
+interface EligibilityCheck {
+  result: string;
+  checked_at: string;
+}
+
 interface Toast {
   id: number;
   type: "success" | "error";
@@ -38,19 +45,21 @@ interface ConfirmDialog {
   open: boolean;
   title: string;
   message: string;
+  confirmLabel: string;
+  confirmStyle: "danger" | "warning";
   onConfirm: () => void;
 }
 
 function useNetwork() {
-  const [online, setOnline] = useState(navigator.onLine);
+  const [online, setOnline] = useState(true);
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
     return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
     };
   }, []);
   return online;
@@ -77,16 +86,29 @@ export default function SupportPage() {
   const [newEmail, setNewEmail] = useState("");
   const [savingEmail, setSavingEmail] = useState(false);
 
-  // Override reason
+  // Manual override
   const [overrideReason, setOverrideReason] = useState("");
   const [overridingVoter, setOverridingVoter] = useState<string | null>(null);
   const [processingOverride, setProcessingOverride] = useState(false);
+
+  // Eligibility reset
+  const [eligibilityChecks, setEligibilityChecks] = useState<
+    Record<string, EligibilityCheck | null>
+  >({});
+  const [resetEligibilityVoter, setResetEligibilityVoter] = useState<
+    string | null
+  >(null);
+  const [resetEligibilityReason, setResetEligibilityReason] = useState("");
+  const [processingEligibilityReset, setProcessingEligibilityReset] =
+    useState(false);
 
   // Confirm dialog
   const [confirm, setConfirm] = useState<ConfirmDialog>({
     open: false,
     title: "",
     message: "",
+    confirmLabel: "Confirm",
+    confirmStyle: "danger",
     onConfirm: () => {},
   });
 
@@ -106,6 +128,7 @@ export default function SupportPage() {
       setElectionTitle(data.election.title);
       setElectionStatus(data.election.status);
     } catch {
+      // non-blocking
     } finally {
       setLoading(false);
     }
@@ -120,30 +143,77 @@ export default function SupportPage() {
     );
   }
 
-  function showConfirm(title: string, message: string, onConfirm: () => void) {
-    setConfirm({ open: true, title, message, onConfirm });
+  function showConfirm(
+    title: string,
+    message: string,
+    confirmLabel: string,
+    confirmStyle: "danger" | "warning",
+    onConfirm: () => void,
+  ) {
+    setConfirm({
+      open: true,
+      title,
+      message,
+      confirmLabel,
+      confirmStyle,
+      onConfirm,
+    });
   }
 
   function closeConfirm() {
-    setConfirm({ open: false, title: "", message: "", onConfirm: () => {} });
+    setConfirm({
+      open: false,
+      title: "",
+      message: "",
+      confirmLabel: "Confirm",
+      confirmStyle: "danger",
+      onConfirm: () => {},
+    });
   }
 
   async function handleSearch() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     setHasSearched(true);
+    setEligibilityChecks({});
     try {
       const res = await fetch(
         `/api/admin/support/search?election_id=${id}&q=${encodeURIComponent(searchQuery.trim())}`,
       );
       if (!res.ok) return;
       const data = await res.json();
-      setSearchResults(data.voters || []);
+      const voters: Voter[] = data.voters || [];
+      setSearchResults(voters);
+      if (voters.length > 0) {
+        loadEligibilityForVoters(voters);
+      }
     } catch {
       showToast("error", "Search failed. Please try again.");
     } finally {
       setSearching(false);
     }
+  }
+
+  async function loadEligibilityForVoters(voters: Voter[]) {
+    const results: Record<string, EligibilityCheck | null> = {};
+    await Promise.all(
+      voters.map(async (v) => {
+        try {
+          const res = await fetch(
+            `/api/admin/support/search?election_id=${id}&check_eligibility=1&student_id=${encodeURIComponent(v.student_id)}`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            results[v.id] = data.eligibility_check ?? null;
+          } else {
+            results[v.id] = null;
+          }
+        } catch {
+          results[v.id] = null;
+        }
+      }),
+    );
+    setEligibilityChecks(results);
   }
 
   async function handleEmailUpdate(voterId: string) {
@@ -187,10 +257,11 @@ export default function SupportPage() {
       showToast("error", "Please enter a reason for the override.");
       return;
     }
-
     showConfirm(
       "Confirm Manual Override",
       `You are about to manually mark ${voter.full_name} as voted. This action is logged and cannot be undone. Reason: "${overrideReason}"`,
+      "Confirm Override",
+      "danger",
       async () => {
         closeConfirm();
         setProcessingOverride(true);
@@ -225,6 +296,48 @@ export default function SupportPage() {
           showToast("error", "Network error. Please try again.");
         } finally {
           setProcessingOverride(false);
+        }
+      },
+    );
+  }
+
+  async function handleResetEligibility(voter: Voter) {
+    if (!resetEligibilityReason.trim()) {
+      showToast("error", "Please enter a reason for the reset.");
+      return;
+    }
+    showConfirm(
+      "Reset Eligibility Check",
+      `This will allow ${voter.full_name} to complete the eligibility check again online. Reason: "${resetEligibilityReason}"`,
+      "Confirm Reset",
+      "warning",
+      async () => {
+        closeConfirm();
+        setProcessingEligibilityReset(true);
+        try {
+          const res = await fetch(`/api/admin/support/reset-eligibility`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              election_id: id,
+              student_id: voter.student_id,
+              school_email: voter.school_email,
+              reason: resetEligibilityReason.trim(),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            showToast("error", data.error || "Reset failed.");
+            return;
+          }
+          showToast("success", data.message || "Eligibility check reset.");
+          setResetEligibilityVoter(null);
+          setResetEligibilityReason("");
+          setEligibilityChecks((prev) => ({ ...prev, [voter.id]: null }));
+        } catch {
+          showToast("error", "Network error. Please try again.");
+        } finally {
+          setProcessingEligibilityReset(false);
         }
       },
     );
@@ -279,7 +392,11 @@ export default function SupportPage() {
                 toast.type === "success"
                   ? "rgba(22,163,74,0.95)"
                   : "rgba(220,38,38,0.95)",
-              border: `1px solid ${toast.type === "success" ? "rgba(74,222,128,0.3)" : "rgba(252,165,165,0.3)"}`,
+              border: `1px solid ${
+                toast.type === "success"
+                  ? "rgba(74,222,128,0.3)"
+                  : "rgba(252,165,165,0.3)"
+              }`,
               backdropFilter: "blur(12px)",
               animation: "slideIn 0.2s ease forwards",
               minWidth: "280px",
@@ -331,9 +448,15 @@ export default function SupportPage() {
               <button
                 onClick={confirm.onConfirm}
                 className="flex-1 py-3 rounded-2xl text-xs font-bold transition-all active:scale-95"
-                style={{ background: "rgba(220,38,38,0.9)", color: "#ffffff" }}
+                style={{
+                  background:
+                    confirm.confirmStyle === "danger"
+                      ? "rgba(220,38,38,0.9)"
+                      : "rgba(249,168,37,0.9)",
+                  color: "#ffffff",
+                }}
               >
-                Confirm Override
+                {confirm.confirmLabel}
               </button>
             </div>
           </div>
@@ -341,7 +464,7 @@ export default function SupportPage() {
       )}
 
       {/* Network banner */}
-      {!online && (
+      {mounted && !online && (
         <div
           className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
           style={{ background: "#DC2626", color: "#ffffff" }}
@@ -520,308 +643,467 @@ export default function SupportPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {searchResults.map((voter) => (
-                    <div
-                      key={voter.id}
-                      className="rounded-2xl overflow-hidden"
-                      style={{
-                        background: "rgba(255,255,255,0.05)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                      }}
-                    >
-                      {/* Voter info */}
-                      <div className="p-5">
-                        <div className="flex items-start gap-4">
-                          <div
-                            className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-base font-black"
-                            style={{
-                              background: voter.has_voted
-                                ? "rgba(22,163,74,0.15)"
-                                : "rgba(255,255,255,0.08)",
-                              color: voter.has_voted
-                                ? "#4ADE80"
-                                : "rgba(255,255,255,0.6)",
-                              border: voter.has_voted
-                                ? "1px solid rgba(22,163,74,0.3)"
-                                : "1px solid rgba(255,255,255,0.1)",
-                            }}
-                          >
-                            {voter.full_name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              <p className="text-sm font-bold text-white">
-                                {voter.full_name}
-                              </p>
-                              <span
-                                className="text-xs font-bold px-2 py-0.5 rounded-full"
-                                style={{
-                                  background: voter.has_voted
-                                    ? "rgba(22,163,74,0.15)"
-                                    : "rgba(255,255,255,0.08)",
-                                  color: voter.has_voted
-                                    ? "#4ADE80"
-                                    : "rgba(255,255,255,0.4)",
-                                }}
-                              >
-                                {voter.has_voted ? "✓ Voted" : "Not voted"}
-                              </span>
+                  {searchResults.map((voter) => {
+                    const eligCheck = eligibilityChecks[voter.id];
+                    const hasFailedEligibility =
+                      eligCheck !== undefined &&
+                      eligCheck !== null &&
+                      eligCheck.result !== "eligible";
+
+                    return (
+                      <div
+                        key={voter.id}
+                        className="rounded-2xl overflow-hidden"
+                        style={{
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        {/* Voter info */}
+                        <div className="p-5">
+                          <div className="flex items-start gap-4">
+                            <div
+                              className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-base font-black"
+                              style={{
+                                background: voter.has_voted
+                                  ? "rgba(22,163,74,0.15)"
+                                  : "rgba(255,255,255,0.08)",
+                                color: voter.has_voted
+                                  ? "#4ADE80"
+                                  : "rgba(255,255,255,0.6)",
+                                border: voter.has_voted
+                                  ? "1px solid rgba(22,163,74,0.3)"
+                                  : "1px solid rgba(255,255,255,0.1)",
+                              }}
+                            >
+                              {voter.full_name.charAt(0).toUpperCase()}
                             </div>
-                            <p
-                              className="text-xs font-mono"
-                              style={{ color: "rgba(255,255,255,0.5)" }}
-                            >
-                              {voter.student_id}
-                            </p>
-                            <p
-                              className="text-xs mt-0.5"
-                              style={{ color: "rgba(255,255,255,0.4)" }}
-                            >
-                              {voter.school_email}
-                            </p>
-                            {voter.department && (
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <p className="text-sm font-bold text-white">
+                                  {voter.full_name}
+                                </p>
+                                <span
+                                  className="text-xs font-bold px-2 py-0.5 rounded-full"
+                                  style={{
+                                    background: voter.has_voted
+                                      ? "rgba(22,163,74,0.15)"
+                                      : "rgba(255,255,255,0.08)",
+                                    color: voter.has_voted
+                                      ? "#4ADE80"
+                                      : "rgba(255,255,255,0.4)",
+                                  }}
+                                >
+                                  {voter.has_voted ? "✓ Voted" : "Not voted"}
+                                </span>
+                                {hasFailedEligibility && (
+                                  <span
+                                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                                    style={{
+                                      background: "rgba(220,38,38,0.15)",
+                                      color: "#F87171",
+                                      border: "1px solid rgba(220,38,38,0.2)",
+                                    }}
+                                  >
+                                    Eligibility failed
+                                  </span>
+                                )}
+                              </div>
+                              <p
+                                className="text-xs font-mono"
+                                style={{ color: "rgba(255,255,255,0.5)" }}
+                              >
+                                {voter.student_id}
+                              </p>
                               <p
                                 className="text-xs mt-0.5"
-                                style={{ color: "rgba(255,255,255,0.3)" }}
+                                style={{ color: "rgba(255,255,255,0.4)" }}
                               >
-                                {voter.department}{" "}
-                                {voter.level ? `· Level ${voter.level}` : ""}
+                                {voter.school_email}
                               </p>
-                            )}
+                              {voter.department && (
+                                <p
+                                  className="text-xs mt-0.5"
+                                  style={{ color: "rgba(255,255,255,0.3)" }}
+                                >
+                                  {voter.department}
+                                  {voter.level ? ` · Level ${voter.level}` : ""}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* Actions */}
-                      {!voter.has_voted && electionStatus === "active" && (
+                        {/* ── Actions block ── */}
                         <div
                           style={{
                             borderTop: "1px solid rgba(255,255,255,0.06)",
                           }}
                         >
-                          {/* Fix email */}
-                          <div
-                            className="p-4"
-                            style={{
-                              borderBottom: "1px solid rgba(255,255,255,0.04)",
-                            }}
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Edit3
-                                  className="w-3.5 h-3.5"
-                                  style={{ color: "#60A5FA" }}
-                                />
-                                <p
-                                  className="text-xs font-bold"
-                                  style={{ color: "#60A5FA" }}
-                                >
-                                  Fix Email
-                                </p>
-                              </div>
-                              <p
-                                className="text-xs"
-                                style={{ color: "rgba(255,255,255,0.3)" }}
-                              >
-                                If student&apos;s email is wrong
-                              </p>
-                            </div>
-
-                            {editingEmail === voter.id ? (
-                              <div className="flex gap-2">
-                                <input
-                                  type="email"
-                                  value={newEmail}
-                                  onChange={(e) => setNewEmail(e.target.value)}
-                                  placeholder="Enter correct email..."
-                                  autoFocus
-                                  className="flex-1 px-3 py-2.5 rounded-xl text-xs outline-none"
+                          {/* Eligibility reset — always show if student has a failed check */}
+                          {hasFailedEligibility && (
+                            <div
+                              className="p-4"
+                              style={{
+                                borderBottom:
+                                  "1px solid rgba(255,255,255,0.04)",
+                              }}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <ClipboardX
+                                    className="w-3.5 h-3.5"
+                                    style={{ color: "#F87171" }}
+                                  />
+                                  <p
+                                    className="text-xs font-bold"
+                                    style={{ color: "#F87171" }}
+                                  >
+                                    Eligibility Check Failed
+                                  </p>
+                                </div>
+                                <span
+                                  className="text-xs px-2 py-0.5 rounded-full font-bold capitalize"
                                   style={{
-                                    background: "rgba(255,255,255,0.07)",
-                                    border: "1px solid rgba(255,255,255,0.1)",
-                                    color: "#ffffff",
+                                    background: "rgba(220,38,38,0.12)",
+                                    color: "#F87171",
+                                    border: "1px solid rgba(220,38,38,0.2)",
                                   }}
-                                />
+                                >
+                                  {eligCheck!.result.replace(/_/g, " ")}
+                                </span>
+                              </div>
+
+                              {resetEligibilityVoter === voter.id ? (
+                                <div className="space-y-2">
+                                  <input
+                                    type="text"
+                                    value={resetEligibilityReason}
+                                    onChange={(e) =>
+                                      setResetEligibilityReason(e.target.value)
+                                    }
+                                    placeholder="Reason for reset (required)..."
+                                    autoFocus
+                                    className="w-full px-3 py-2.5 rounded-xl text-xs outline-none"
+                                    style={{
+                                      background: "rgba(255,255,255,0.07)",
+                                      border: "1px solid rgba(248,113,113,0.3)",
+                                      color: "#ffffff",
+                                    }}
+                                  />
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setResetEligibilityVoter(null);
+                                        setResetEligibilityReason("");
+                                      }}
+                                      className="px-4 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                                      style={{
+                                        background: "rgba(255,255,255,0.05)",
+                                        color: "rgba(255,255,255,0.5)",
+                                      }}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        handleResetEligibility(voter)
+                                      }
+                                      disabled={
+                                        processingEligibilityReset ||
+                                        !resetEligibilityReason.trim()
+                                      }
+                                      className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                                      style={{
+                                        background: "rgba(248,113,113,0.15)",
+                                        color: "#F87171",
+                                        border:
+                                          "1px solid rgba(248,113,113,0.3)",
+                                      }}
+                                    >
+                                      {processingEligibilityReset ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="w-3.5 h-3.5" />
+                                      )}
+                                      Confirm Reset
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
                                 <button
-                                  onClick={() => handleEmailUpdate(voter.id)}
-                                  disabled={savingEmail}
-                                  className="px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-40"
-                                  style={{
-                                    background: "rgba(96,165,250,0.2)",
-                                    color: "#60A5FA",
-                                    border: "1px solid rgba(96,165,250,0.3)",
-                                  }}
-                                >
-                                  {savingEmail ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    "Save"
-                                  )}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setEditingEmail(null);
-                                    setNewEmail("");
-                                  }}
-                                  className="px-3 py-2.5 rounded-xl text-xs transition-all active:scale-95"
-                                  style={{
-                                    background: "rgba(255,255,255,0.05)",
-                                    color: "rgba(255,255,255,0.4)",
-                                  }}
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setEditingEmail(voter.id);
-                                  setNewEmail(voter.school_email);
-                                }}
-                                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
-                                style={{
-                                  background: "rgba(96,165,250,0.1)",
-                                  color: "#60A5FA",
-                                  border: "1px solid rgba(96,165,250,0.2)",
-                                }}
-                              >
-                                <Edit3 className="w-3 h-3" />
-                                Edit Email
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Manual override */}
-                          <div className="p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Key
-                                  className="w-3.5 h-3.5"
-                                  style={{ color: "#F9A825" }}
-                                />
-                                <p
-                                  className="text-xs font-bold"
-                                  style={{ color: "#F9A825" }}
-                                >
-                                  Manual Override
-                                </p>
-                              </div>
-                              <p
-                                className="text-xs"
-                                style={{ color: "rgba(255,255,255,0.3)" }}
-                              >
-                                Last resort only
-                              </p>
-                            </div>
-
-                            {overridingVoter === voter.id ? (
-                              <div className="space-y-2">
-                                <input
-                                  type="text"
-                                  value={overrideReason}
-                                  onChange={(e) =>
-                                    setOverrideReason(e.target.value)
+                                  onClick={() =>
+                                    setResetEligibilityVoter(voter.id)
                                   }
-                                  placeholder="Reason for override (required)..."
-                                  autoFocus
-                                  className="w-full px-3 py-2.5 rounded-xl text-xs outline-none"
+                                  className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
                                   style={{
-                                    background: "rgba(255,255,255,0.07)",
-                                    border: "1px solid rgba(249,168,37,0.3)",
-                                    color: "#ffffff",
+                                    background: "rgba(248,113,113,0.1)",
+                                    color: "#F87171",
+                                    border: "1px solid rgba(248,113,113,0.2)",
                                   }}
-                                />
-                                <div className="flex gap-2">
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  Reset Eligibility Check
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Election active actions */}
+                          {!voter.has_voted && electionStatus === "active" && (
+                            <>
+                              {/* Fix email */}
+                              <div
+                                className="p-4"
+                                style={{
+                                  borderBottom:
+                                    "1px solid rgba(255,255,255,0.04)",
+                                }}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <Edit3
+                                      className="w-3.5 h-3.5"
+                                      style={{ color: "#60A5FA" }}
+                                    />
+                                    <p
+                                      className="text-xs font-bold"
+                                      style={{ color: "#60A5FA" }}
+                                    >
+                                      Fix Email
+                                    </p>
+                                  </div>
+                                  <p
+                                    className="text-xs"
+                                    style={{
+                                      color: "rgba(255,255,255,0.3)",
+                                    }}
+                                  >
+                                    If student&apos;s email is wrong
+                                  </p>
+                                </div>
+
+                                {editingEmail === voter.id ? (
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="email"
+                                      value={newEmail}
+                                      onChange={(e) =>
+                                        setNewEmail(e.target.value)
+                                      }
+                                      placeholder="Enter correct email..."
+                                      autoFocus
+                                      className="flex-1 px-3 py-2.5 rounded-xl text-xs outline-none"
+                                      style={{
+                                        background: "rgba(255,255,255,0.07)",
+                                        border:
+                                          "1px solid rgba(255,255,255,0.1)",
+                                        color: "#ffffff",
+                                      }}
+                                    />
+                                    <button
+                                      onClick={() =>
+                                        handleEmailUpdate(voter.id)
+                                      }
+                                      disabled={savingEmail}
+                                      className="px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-40"
+                                      style={{
+                                        background: "rgba(96,165,250,0.2)",
+                                        color: "#60A5FA",
+                                        border:
+                                          "1px solid rgba(96,165,250,0.3)",
+                                      }}
+                                    >
+                                      {savingEmail ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        "Save"
+                                      )}
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setEditingEmail(null);
+                                        setNewEmail("");
+                                      }}
+                                      className="px-3 py-2.5 rounded-xl text-xs transition-all active:scale-95"
+                                      style={{
+                                        background: "rgba(255,255,255,0.05)",
+                                        color: "rgba(255,255,255,0.4)",
+                                      }}
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
                                   <button
                                     onClick={() => {
-                                      setOverridingVoter(null);
-                                      setOverrideReason("");
+                                      setEditingEmail(voter.id);
+                                      setNewEmail(voter.school_email);
                                     }}
-                                    className="px-4 py-2.5 rounded-xl text-xs font-semibold"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
                                     style={{
-                                      background: "rgba(255,255,255,0.05)",
-                                      color: "rgba(255,255,255,0.5)",
+                                      background: "rgba(96,165,250,0.1)",
+                                      color: "#60A5FA",
+                                      border: "1px solid rgba(96,165,250,0.2)",
                                     }}
                                   >
-                                    Cancel
+                                    <Edit3 className="w-3 h-3" />
+                                    Edit Email
                                   </button>
-                                  <button
-                                    onClick={() => handleManualOverride(voter)}
-                                    disabled={
-                                      processingOverride ||
-                                      !overrideReason.trim()
-                                    }
-                                    className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
-                                    style={{
-                                      background: "rgba(249,168,37,0.2)",
-                                      color: "#F9A825",
-                                      border: "1px solid rgba(249,168,37,0.4)",
-                                    }}
-                                  >
-                                    {processingOverride ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <Key className="w-3.5 h-3.5" />
-                                    )}
-                                    Confirm Override
-                                  </button>
-                                </div>
+                                )}
                               </div>
-                            ) : (
-                              <button
-                                onClick={() => setOverridingVoter(voter.id)}
-                                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
-                                style={{
-                                  background: "rgba(249,168,37,0.1)",
-                                  color: "#F9A825",
-                                  border: "1px solid rgba(249,168,37,0.2)",
-                                }}
+
+                              {/* Manual override */}
+                              <div className="p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <Key
+                                      className="w-3.5 h-3.5"
+                                      style={{ color: "#F9A825" }}
+                                    />
+                                    <p
+                                      className="text-xs font-bold"
+                                      style={{ color: "#F9A825" }}
+                                    >
+                                      Manual Override
+                                    </p>
+                                  </div>
+                                  <p
+                                    className="text-xs"
+                                    style={{
+                                      color: "rgba(255,255,255,0.3)",
+                                    }}
+                                  >
+                                    Last resort only
+                                  </p>
+                                </div>
+
+                                {overridingVoter === voter.id ? (
+                                  <div className="space-y-2">
+                                    <input
+                                      type="text"
+                                      value={overrideReason}
+                                      onChange={(e) =>
+                                        setOverrideReason(e.target.value)
+                                      }
+                                      placeholder="Reason for override (required)..."
+                                      autoFocus
+                                      className="w-full px-3 py-2.5 rounded-xl text-xs outline-none"
+                                      style={{
+                                        background: "rgba(255,255,255,0.07)",
+                                        border:
+                                          "1px solid rgba(249,168,37,0.3)",
+                                        color: "#ffffff",
+                                      }}
+                                    />
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setOverridingVoter(null);
+                                          setOverrideReason("");
+                                        }}
+                                        className="px-4 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                                        style={{
+                                          background: "rgba(255,255,255,0.05)",
+                                          color: "rgba(255,255,255,0.5)",
+                                        }}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          handleManualOverride(voter)
+                                        }
+                                        disabled={
+                                          processingOverride ||
+                                          !overrideReason.trim()
+                                        }
+                                        className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                                        style={{
+                                          background: "rgba(249,168,37,0.2)",
+                                          color: "#F9A825",
+                                          border:
+                                            "1px solid rgba(249,168,37,0.4)",
+                                        }}
+                                      >
+                                        {processingOverride ? (
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                          <Key className="w-3.5 h-3.5" />
+                                        )}
+                                        Confirm Override
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setOverridingVoter(voter.id)}
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                                    style={{
+                                      background: "rgba(249,168,37,0.1)",
+                                      color: "#F9A825",
+                                      border: "1px solid rgba(249,168,37,0.2)",
+                                    }}
+                                  >
+                                    <Key className="w-3 h-3" />
+                                    Manual Override
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          )}
+
+                          {/* Already voted */}
+                          {voter.has_voted && (
+                            <div className="px-5 py-3">
+                              <p
+                                className="text-xs"
+                                style={{ color: "rgba(22,163,74,0.7)" }}
                               >
-                                <Key className="w-3 h-3" />
-                                Manual Override
-                              </button>
+                                ✓ This voter has already cast their ballot. No
+                                action needed.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Election not active — no override actions */}
+                          {!voter.has_voted &&
+                            electionStatus !== "active" &&
+                            !hasFailedEligibility && (
+                              <div className="px-5 py-3">
+                                <p
+                                  className="text-xs"
+                                  style={{
+                                    color: "rgba(255,255,255,0.3)",
+                                  }}
+                                >
+                                  Override actions are only available while the
+                                  election is active.
+                                </p>
+                              </div>
                             )}
-                          </div>
-                        </div>
-                      )}
 
-                      {/* Already voted */}
-                      {voter.has_voted && (
-                        <div
-                          className="px-5 py-3"
-                          style={{
-                            borderTop: "1px solid rgba(255,255,255,0.06)",
-                          }}
-                        >
-                          <p
-                            className="text-xs"
-                            style={{ color: "rgba(22,163,74,0.7)" }}
-                          >
-                            ✓ This voter has already cast their ballot. No
-                            action needed.
-                          </p>
+                          {/* Election not active but has eligibility issue */}
+                          {!voter.has_voted &&
+                            electionStatus !== "active" &&
+                            hasFailedEligibility && (
+                              <div className="px-5 py-3">
+                                <p
+                                  className="text-xs"
+                                  style={{
+                                    color: "rgba(255,255,255,0.3)",
+                                  }}
+                                >
+                                  Voting override is only available while the
+                                  election is active. Eligibility reset is
+                                  available above.
+                                </p>
+                              </div>
+                            )}
                         </div>
-                      )}
-
-                      {/* Election not active */}
-                      {!voter.has_voted && electionStatus !== "active" && (
-                        <div
-                          className="px-5 py-3"
-                          style={{
-                            borderTop: "1px solid rgba(255,255,255,0.06)",
-                          }}
-                        >
-                          <p
-                            className="text-xs"
-                            style={{ color: "rgba(255,255,255,0.3)" }}
-                          >
-                            Override actions are only available while the
-                            election is active.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

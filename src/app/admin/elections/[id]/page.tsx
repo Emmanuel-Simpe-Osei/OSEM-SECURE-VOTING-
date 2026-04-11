@@ -20,6 +20,7 @@ import {
   Copy,
   WifiOff,
   Headphones,
+  ClipboardCheck,
 } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/utils/time";
 
@@ -34,6 +35,8 @@ interface Election {
   description: string | null;
   session_verification_enabled: boolean;
   session_verification_message: string;
+  eligibility_check_enabled: boolean;
+  eligibility_check_open_from: string | null;
 }
 
 interface Position {
@@ -49,10 +52,10 @@ interface Stats {
   has_voted: number;
   turnout_percent: number;
 }
+
 function useNetwork() {
   const [online, setOnline] = useState(true);
   useEffect(() => {
-    // Set initial value on client only
     const update = () => setOnline(navigator.onLine);
     update();
     window.addEventListener("online", update);
@@ -79,6 +82,7 @@ export default function ElectionDetailPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [copiedResults, setCopiedResults] = useState(false);
+  const [copiedEligibility, setCopiedEligibility] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   // Session verification state
@@ -88,6 +92,17 @@ export default function ElectionDetailPage() {
   );
   const [savingSession, setSavingSession] = useState(false);
   const [sessionSaved, setSessionSaved] = useState(false);
+
+  // Eligibility check state
+  const [eligibilityEnabled, setEligibilityEnabled] = useState(false);
+  const [eligibilityOpenFrom, setEligibilityOpenFrom] = useState("");
+  const [savingEligibility, setSavingEligibility] = useState(false);
+  const [eligibilitySaved, setEligibilitySaved] = useState(false);
+  const [eligibilityStats, setEligibilityStats] = useState<{
+    total: number;
+    eligible: number;
+    failed: number;
+  } | null>(null);
 
   useEffect(() => {
     loadElection();
@@ -116,12 +131,37 @@ export default function ElectionDetailPage() {
         data.election.session_verification_message ||
           "Your session could not be verified. Please visit the admin desk with your student ID or proof of registration to complete your verification.",
       );
+      setEligibilityEnabled(data.election.eligibility_check_enabled || false);
+      if (data.election.eligibility_check_open_from) {
+        // Convert to local datetime-local format
+        const d = new Date(data.election.eligibility_check_open_from);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        setEligibilityOpenFrom(
+          `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        );
+      }
     } catch {
       setError("Failed to load election.");
     } finally {
       setLoading(false);
     }
   }
+
+  async function loadEligibilityStats() {
+    try {
+      const res = await fetch(`/api/admin/elections/${id}/eligibility-check`);
+      if (res.ok) {
+        const data = await res.json();
+        setEligibilityStats(data.stats);
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+
+  useEffect(() => {
+    if (mounted) loadEligibilityStats();
+  }, [mounted]);
 
   async function changeStatus(newStatus: string) {
     setActionLoading(newStatus);
@@ -170,6 +210,31 @@ export default function ElectionDetailPage() {
     }
   }
 
+  async function saveEligibilityCheck() {
+    setSavingEligibility(true);
+    try {
+      const res = await fetch(`/api/admin/elections/${id}/eligibility-check`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: eligibilityEnabled,
+          open_from: eligibilityOpenFrom
+            ? new Date(eligibilityOpenFrom).toISOString()
+            : null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEligibilityStats(data.stats);
+        setEligibilitySaved(true);
+        setTimeout(() => setEligibilitySaved(false), 2500);
+      }
+    } catch {
+    } finally {
+      setSavingEligibility(false);
+    }
+  }
+
   function copyUrl() {
     const url = `${window.location.origin}/election/${election?.slug}/login`;
     navigator.clipboard.writeText(url).then(() => {
@@ -183,6 +248,14 @@ export default function ElectionDetailPage() {
     navigator.clipboard.writeText(url).then(() => {
       setCopiedResults(true);
       setTimeout(() => setCopiedResults(false), 2500);
+    });
+  }
+
+  function copyEligibilityUrl() {
+    const url = `${window.location.origin}/election/${election?.slug}/eligibility`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedEligibility(true);
+      setTimeout(() => setCopiedEligibility(false), 2500);
     });
   }
 
@@ -260,6 +333,10 @@ export default function ElectionDetailPage() {
     typeof window !== "undefined"
       ? `${window.location.origin}/election/${election.slug}/results`
       : `/election/${election.slug}/results`;
+  const eligibilityUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/election/${election.slug}/eligibility`
+      : `/election/${election.slug}/eligibility`;
 
   return (
     <div
@@ -918,7 +995,6 @@ export default function ElectionDetailPage() {
               transition: "opacity 0.4s ease 0.38s",
             }}
           >
-            {/* Header row */}
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="text-sm font-bold text-white">
@@ -931,7 +1007,6 @@ export default function ElectionDetailPage() {
                   Require students to confirm their session before voting
                 </p>
               </div>
-              {/* Toggle switch */}
               <button
                 onClick={() => setSessionVerification((v) => !v)}
                 className="relative w-12 h-6 rounded-full transition-all shrink-0"
@@ -952,7 +1027,6 @@ export default function ElectionDetailPage() {
               </button>
             </div>
 
-            {/* Message customizer — only when enabled */}
             {sessionVerification && (
               <div className="mt-2 space-y-3">
                 <div>
@@ -982,8 +1056,6 @@ export default function ElectionDetailPage() {
                     or proof of registration for Level 100)
                   </p>
                 </div>
-
-                {/* Sessions */}
                 <div>
                   <p
                     className="text-xs font-bold mb-2 uppercase tracking-wide"
@@ -1010,7 +1082,6 @@ export default function ElectionDetailPage() {
               </div>
             )}
 
-            {/* Save button */}
             <button
               onClick={saveSessionVerification}
               disabled={savingSession}
@@ -1041,6 +1112,221 @@ export default function ElectionDetailPage() {
             </button>
           </div>
 
+          {/* ── Eligibility Check Toggle ── */}
+          <div
+            className="rounded-2xl p-5 mb-4"
+            style={{
+              background: eligibilityEnabled
+                ? "rgba(96,165,250,0.06)"
+                : "rgba(255,255,255,0.03)",
+              border: eligibilityEnabled
+                ? "1px solid rgba(96,165,250,0.25)"
+                : "1px solid rgba(255,255,255,0.06)",
+              opacity: mounted ? 1 : 0,
+              transition: "opacity 0.4s ease 0.42s",
+            }}
+          >
+            {/* Header row */}
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-bold text-white">
+                  Pre-Election Eligibility Check
+                </p>
+                <p
+                  className="text-xs mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  Let students verify they can vote before election day
+                </p>
+              </div>
+              <button
+                onClick={() => setEligibilityEnabled((v) => !v)}
+                className="relative w-12 h-6 rounded-full transition-all shrink-0"
+                style={{
+                  background: eligibilityEnabled
+                    ? "rgba(96,165,250,0.8)"
+                    : "rgba(255,255,255,0.1)",
+                }}
+              >
+                <div
+                  className="absolute top-0.5 w-5 h-5 rounded-full transition-all"
+                  style={{
+                    background: "#ffffff",
+                    left: eligibilityEnabled ? "calc(100% - 22px)" : "2px",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                  }}
+                />
+              </button>
+            </div>
+
+            {eligibilityEnabled && (
+              <div className="mt-2 space-y-4">
+                {/* Open from date */}
+                <div>
+                  <label
+                    className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
+                    style={{ color: "rgba(255,255,255,0.4)" }}
+                  >
+                    Open from (optional)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={eligibilityOpenFrom}
+                    onChange={(e) => setEligibilityOpenFrom(e.target.value)}
+                    className="w-full px-4 py-3 rounded-2xl text-sm outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "#ffffff",
+                      colorScheme: "dark",
+                    }}
+                  />
+                  <p
+                    className="text-xs mt-1.5"
+                    style={{ color: "rgba(255,255,255,0.3)" }}
+                  >
+                    Leave blank to open immediately. Eligibility check closes
+                    automatically when the election goes active.
+                  </p>
+                </div>
+
+                {/* Stats */}
+                {eligibilityStats && eligibilityStats.total > 0 && (
+                  <div
+                    className="rounded-2xl p-4"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <p
+                      className="text-xs font-bold mb-3 uppercase tracking-wide"
+                      style={{ color: "rgba(255,255,255,0.4)" }}
+                    >
+                      Check Results So Far
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        {
+                          label: "Total Checked",
+                          value: eligibilityStats.total,
+                          color: "#60A5FA",
+                        },
+                        {
+                          label: "Eligible",
+                          value: eligibilityStats.eligible,
+                          color: "#4ADE80",
+                        },
+                        {
+                          label: "Issues Found",
+                          value: eligibilityStats.failed,
+                          color: "#F87171",
+                        },
+                      ].map((s) => (
+                        <div key={s.label} className="text-center">
+                          <p
+                            className="text-xl font-bold"
+                            style={{ color: s.color }}
+                          >
+                            {s.value}
+                          </p>
+                          <p
+                            className="text-xs mt-0.5"
+                            style={{ color: "rgba(255,255,255,0.35)" }}
+                          >
+                            {s.label}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Eligibility URL */}
+                <div>
+                  <p
+                    className="text-xs font-bold mb-2 uppercase tracking-wide"
+                    style={{ color: "rgba(255,255,255,0.4)" }}
+                  >
+                    Eligibility Check URL
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <p
+                      className="text-xs font-mono flex-1 break-all leading-relaxed"
+                      style={{ color: "#60A5FA" }}
+                    >
+                      {eligibilityUrl}
+                    </p>
+                    <button
+                      onClick={copyEligibilityUrl}
+                      className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95"
+                      style={{
+                        background: copiedEligibility
+                          ? "rgba(22,163,74,0.2)"
+                          : "rgba(96,165,250,0.15)",
+                        color: copiedEligibility ? "#4ADE80" : "#60A5FA",
+                        border: copiedEligibility
+                          ? "1px solid rgba(22,163,74,0.3)"
+                          : "1px solid rgba(96,165,250,0.3)",
+                      }}
+                    >
+                      {copiedEligibility ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          Copy URL
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p
+                    className="text-xs mt-2"
+                    style={{ color: "rgba(255,255,255,0.25)" }}
+                  >
+                    Share this with students 2–3 days before election day. Each
+                    student gets one attempt only.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={saveEligibilityCheck}
+              disabled={savingEligibility}
+              className="w-full mt-4 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+              style={{
+                background: eligibilitySaved
+                  ? "rgba(22,163,74,0.2)"
+                  : "rgba(96,165,250,0.15)",
+                color: eligibilitySaved ? "#4ADE80" : "#60A5FA",
+                border: eligibilitySaved
+                  ? "1px solid rgba(22,163,74,0.3)"
+                  : "1px solid rgba(96,165,250,0.3)",
+              }}
+            >
+              {savingEligibility ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Saving...
+                </>
+              ) : eligibilitySaved ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Saved!
+                </>
+              ) : (
+                <>
+                  <ClipboardCheck className="w-3.5 h-3.5" />
+                  Save Eligibility Settings
+                </>
+              )}
+            </button>
+          </div>
+
           {/* Voter portal URL */}
           <div
             className="rounded-2xl p-5 mb-4"
@@ -1048,7 +1334,7 @@ export default function ElectionDetailPage() {
               background: "rgba(255,255,255,0.03)",
               border: "1px solid rgba(255,255,255,0.06)",
               opacity: mounted ? 1 : 0,
-              transition: "opacity 0.4s ease 0.4s",
+              transition: "opacity 0.4s ease 0.44s",
             }}
           >
             <p

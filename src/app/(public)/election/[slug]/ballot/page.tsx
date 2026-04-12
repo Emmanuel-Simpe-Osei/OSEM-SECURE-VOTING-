@@ -1,6 +1,5 @@
 "use client";
-
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronRight,
@@ -13,6 +12,7 @@ import {
   WifiOff,
   Copy,
   Check,
+  Wifi,
 } from "lucide-react";
 
 interface Candidate {
@@ -39,6 +39,11 @@ interface BallotData {
   token: string;
 }
 
+interface VoteSelection {
+  position: string;
+  candidate: string;
+}
+
 function useNetwork() {
   const [online, setOnline] = useState<boolean>(() =>
     typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -56,6 +61,79 @@ function useNetwork() {
   return online;
 }
 
+async function preloadImages(positions: Position[]): Promise<void> {
+  const urls = positions
+    .flatMap((p) => p.candidates)
+    .map((c) => c.photo_url)
+    .filter(Boolean) as string[];
+  if (urls.length === 0) return;
+  await Promise.all(
+    urls.map(
+      (url) =>
+        new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = url;
+        }),
+    ),
+  );
+}
+
+function CandidateSkeleton() {
+  return (
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      <div className="w-full skeleton-shimmer" style={{ aspectRatio: "1/1" }} />
+      <div className="p-4 space-y-2">
+        <div
+          className="h-3.5 rounded-full skeleton-shimmer"
+          style={{ width: "75%" }}
+        />
+        <div
+          className="h-2.5 rounded-full skeleton-shimmer"
+          style={{ width: "45%" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function BallotSkeleton() {
+  return (
+    <div>
+      <div className="mb-8 space-y-3">
+        <div
+          className="h-4 rounded-full skeleton-shimmer"
+          style={{ width: "30%" }}
+        />
+        <div
+          className="h-8 rounded-2xl skeleton-shimmer"
+          style={{ width: "60%" }}
+        />
+        <div
+          className="h-3 rounded-full skeleton-shimmer"
+          style={{ width: "40%" }}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        {[1, 2, 3, 4].map((i) => (
+          <CandidateSkeleton key={i} />
+        ))}
+      </div>
+      <div
+        className="h-14 rounded-2xl skeleton-shimmer"
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
+}
+
 export default function BallotPage() {
   const params = useParams();
   const router = useRouter();
@@ -64,6 +142,9 @@ export default function BallotPage() {
 
   const [ballot, setBallot] = useState<BallotData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [imagesReady, setImagesReady] = useState(false);
+  const [slowNetwork, setSlowNetwork] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const [error, setError] = useState("");
   const [currentStep, setCurrentStep] = useState(0);
   const [selections, setSelections] = useState<Record<string, string[]>>({});
@@ -71,9 +152,7 @@ export default function BallotPage() {
   const [submitted, setSubmitted] = useState(false);
   const [confirmationCode, setConfirmationCode] = useState("");
   const [submittedAt, setSubmittedAt] = useState("");
-  const [voteSelections, setVoteSelections] = useState<
-    { position: string; candidate: string }[]
-  >([]);
+  const [voteSelections, setVoteSelections] = useState<VoteSelection[]>([]);
   const [copied, setCopied] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [animKey, setAnimKey] = useState(0);
@@ -81,27 +160,21 @@ export default function BallotPage() {
   const totalPositions = ballot?.positions.length || 0;
   const isReviewStep = currentStep === totalPositions;
   const currentPosition = ballot?.positions[currentStep];
+  const showSkeleton = loading || (ballot !== null && !imagesReady);
 
-  // ── Lock browser back button ──────────────────────────────────────
   useEffect(() => {
-    // Push a state so we can intercept back
     window.history.pushState(null, "", window.location.href);
-
     const handlePopState = () => {
       if (submitted) {
-        // After voting — back goes to a safe public page
         router.replace(`/election/${slug}/login`);
       } else {
-        // During voting — push state again to block back
         window.history.pushState(null, "", window.location.href);
       }
     };
-
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [submitted, slug, router]);
 
-  // ── Countdown after voting ────────────────────────────────────────
   useEffect(() => {
     if (!submitted) return;
     if (countdown <= 0) {
@@ -114,15 +187,21 @@ export default function BallotPage() {
 
   useEffect(() => {
     loadBallot();
-  }, []);
+  }, [retryCount]);
 
   async function loadBallot() {
+    setLoading(true);
+    setImagesReady(false);
+    setError("");
+    setSlowNetwork(false);
+    const slowTimer = setTimeout(() => setSlowNetwork(true), 3000);
     try {
       const electionRes = await fetch(`/api/election/by-slug/${slug}`);
       const electionData = await electionRes.json();
       if (!electionData?.id) {
         setError("Election not found.");
         setLoading(false);
+        clearTimeout(slowTimer);
         return;
       }
       const res = await fetch(`/api/ballot/${electionData.id}`);
@@ -134,12 +213,18 @@ export default function BallotPage() {
         }
         setError(data.error || "Failed to load ballot.");
         setLoading(false);
+        clearTimeout(slowTimer);
         return;
       }
       setBallot(data);
+      setLoading(false);
+      clearTimeout(slowTimer);
+      setSlowNetwork(false);
+      await preloadImages(data.positions);
+      setImagesReady(true);
     } catch {
-      setError("Network error. Please refresh.");
-    } finally {
+      clearTimeout(slowTimer);
+      setError("Network error. Please check your connection and try again.");
       setLoading(false);
     }
   }
@@ -180,7 +265,7 @@ export default function BallotPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback for older browsers
+      // fallback
     }
   }
 
@@ -196,7 +281,6 @@ export default function BallotPage() {
             candidate_id: candidateId,
           })),
       );
-
       const res = await fetch("/api/vote/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -211,9 +295,7 @@ export default function BallotPage() {
         setSubmitting(false);
         return;
       }
-
-      // Build vote summary for receipt
-      const summary = ballot.positions.map((position) => {
+      const summary: VoteSelection[] = ballot.positions.map((position) => {
         const selectedIds = selections[position.id] || [];
         const selectedCandidates = position.candidates
           .filter((c) => selectedIds.includes(c.id))
@@ -223,7 +305,6 @@ export default function BallotPage() {
           candidate: selectedCandidates.join(", "),
         };
       });
-
       setVoteSelections(summary);
       setConfirmationCode(data.confirmation_code);
       setSubmittedAt(
@@ -236,8 +317,6 @@ export default function BallotPage() {
           hour12: true,
         }),
       );
-
-      // Replace history so back button can't return to ballot
       window.history.replaceState(null, "", `/election/${slug}/ballot`);
       setSubmitted(true);
     } catch {
@@ -246,35 +325,102 @@ export default function BallotPage() {
     }
   }
 
-  // ── LOADING ───────────────────────────────────────────────────────
-  if (loading) {
+  // ── SKELETON ──────────────────────────────────────────────────────
+  if (showSkeleton) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-screen flex flex-col"
         style={{ background: "#0B1E35" }}
       >
-        <div className="flex flex-col items-center gap-4">
+        <style>{`
+          @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+          .skeleton-shimmer {
+            background: linear-gradient(
+              90deg,
+              rgba(255,255,255,0.05) 25%,
+              rgba(255,255,255,0.12) 50%,
+              rgba(255,255,255,0.05) 75%
+            );
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+          }
+        `}</style>
+
+        {slowNetwork && (
           <div
-            className="w-14 h-14 rounded-2xl flex items-center justify-center"
-            style={{
-              background: "linear-gradient(135deg, #F9A825, #E65100)",
-              boxShadow: "0 20px 40px rgba(249,168,37,0.3)",
-            }}
+            className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
+            style={{ background: "rgba(249,168,37,0.15)", color: "#F9A825" }}
           >
-            <ShieldCheck className="w-7 h-7" style={{ color: "#0B1E35" }} />
+            <Wifi className="w-3.5 h-3.5" />
+            Slow connection detected — loading your ballot, please wait...
+          </div>
+        )}
+
+        <div
+          className="w-full px-5 py-4 flex items-center justify-between shrink-0"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-8 h-8 rounded-xl flex items-center justify-center"
+              style={{
+                background: "rgba(249,168,37,0.15)",
+                border: "1px solid rgba(249,168,37,0.3)",
+              }}
+            >
+              <ShieldCheck className="w-4 h-4" style={{ color: "#F9A825" }} />
+            </div>
+            <p className="text-xs font-bold" style={{ color: "#F9A825" }}>
+              OSEM Secure Vote
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Loader2
-              className="w-4 h-4 animate-spin"
-              style={{ color: "#F9A825" }}
+              className="w-3.5 h-3.5 animate-spin"
+              style={{ color: "rgba(255,255,255,0.3)" }}
             />
-            <p
-              className="text-sm font-medium"
-              style={{ color: "rgba(255,255,255,0.5)" }}
-            >
-              Loading your ballot...
+            <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+              {loading ? "Loading ballot..." : "Preparing images..."}
             </p>
           </div>
+        </div>
+
+        <div
+          className="w-full h-0.5"
+          style={{ background: "rgba(255,255,255,0.08)" }}
+        />
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-2xl mx-auto px-4 py-8">
+            <BallotSkeleton />
+          </div>
+        </div>
+
+        <div
+          className="w-full px-6 py-4 flex items-center justify-between shrink-0"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className="w-1.5 h-1.5 rounded-full animate-pulse"
+              style={{ background: "#F9A825" }}
+            />
+            <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+              Securing your session...
+            </p>
+          </div>
+          <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+            Powered by{" "}
+            <span
+              className="font-semibold"
+              style={{ color: "rgba(255,255,255,0.5)" }}
+            >
+              OSEM Technologies
+            </span>
+          </p>
         </div>
       </div>
     );
@@ -308,11 +454,22 @@ export default function BallotPage() {
             {error}
           </p>
           <button
-            onClick={() => router.replace(`/election/${slug}/login`)}
-            className="w-full py-3.5 rounded-2xl text-sm font-bold transition-all active:scale-95"
+            onClick={() => setRetryCount((r) => r + 1)}
+            className="w-full py-3.5 rounded-2xl text-sm font-bold transition-all active:scale-95 mb-3"
             style={{
               background: "linear-gradient(135deg, #F9A825, #E65100)",
               color: "#0B1E35",
+            }}
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => router.replace(`/election/${slug}/login`)}
+            className="w-full py-3.5 rounded-2xl text-sm font-semibold transition-all active:scale-95"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              color: "rgba(255,255,255,0.6)",
+              border: "1px solid rgba(255,255,255,0.1)",
             }}
           >
             Back to Login
@@ -324,10 +481,8 @@ export default function BallotPage() {
 
   // ── SUCCESS ───────────────────────────────────────────────────────
   if (submitted) {
-    // Format code with dots: 2365·7F11·8F65
     const formattedCode =
       confirmationCode.match(/.{1,4}/g)?.join(" · ") || confirmationCode;
-
     return (
       <div
         className="min-h-screen flex flex-col"
@@ -344,7 +499,6 @@ export default function BallotPage() {
           }
         `}</style>
 
-        {/* Header */}
         <div
           className="w-full px-5 py-4 flex items-center justify-between"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
@@ -363,7 +517,6 @@ export default function BallotPage() {
               OSEM Secure Vote
             </p>
           </div>
-          {/* Countdown */}
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-full"
             style={{
@@ -390,7 +543,6 @@ export default function BallotPage() {
             className="max-w-sm mx-auto px-4 py-8"
             style={{ animation: "fadeUp 0.5s ease forwards" }}
           >
-            {/* Success icon */}
             <div
               className="text-center mb-8"
               style={{ animation: "scaleIn 0.4s ease forwards" }}
@@ -423,7 +575,6 @@ export default function BallotPage() {
               )}
             </div>
 
-            {/* Confirmation code */}
             <div
               className="rounded-2xl p-6 mb-4"
               style={{
@@ -470,7 +621,6 @@ export default function BallotPage() {
               </button>
             </div>
 
-            {/* Vote summary */}
             <div
               className="rounded-2xl overflow-hidden mb-4"
               style={{
@@ -513,7 +663,6 @@ export default function BallotPage() {
               ))}
             </div>
 
-            {/* Done message */}
             <div
               className="rounded-2xl p-4 text-center"
               style={{
@@ -528,7 +677,6 @@ export default function BallotPage() {
           </div>
         </div>
 
-        {/* Footer */}
         <div
           className="w-full px-6 py-4 flex items-center justify-center gap-2"
           style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
@@ -565,7 +713,6 @@ export default function BallotPage() {
         .anim-slide { animation: slideUp 0.3s ease forwards; }
       `}</style>
 
-      {/* Network banner */}
       {!online && (
         <div
           className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
@@ -576,7 +723,6 @@ export default function BallotPage() {
         </div>
       )}
 
-      {/* Header */}
       <div
         className="w-full px-5 py-4 flex items-center justify-between shrink-0"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
@@ -612,7 +758,6 @@ export default function BallotPage() {
         </div>
       </div>
 
-      {/* Progress bar */}
       <div
         className="w-full h-0.5"
         style={{ background: "rgba(255,255,255,0.08)" }}
@@ -626,10 +771,8 @@ export default function BallotPage() {
         />
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-8">
-          {/* VOTING STEP */}
           {!isReviewStep && currentPosition && (
             <div key={animKey} className="anim-slide">
               <div className="mb-8">
@@ -658,7 +801,6 @@ export default function BallotPage() {
                 </p>
               </div>
 
-              {/* Candidates grid */}
               <div className="grid grid-cols-2 gap-4 mb-8">
                 {currentPosition.candidates
                   .sort((a, b) => a.sort_order - b.sort_order)
@@ -692,7 +834,6 @@ export default function BallotPage() {
                               : "none",
                           }}
                         >
-                          {/* Square photo */}
                           <div
                             className="w-full relative overflow-hidden"
                             style={{ aspectRatio: "1/1" }}
@@ -760,8 +901,6 @@ export default function BallotPage() {
                               </div>
                             )}
                           </div>
-
-                          {/* Name only */}
                           <div className="p-4">
                             <p
                               className="font-bold text-sm leading-tight"
@@ -790,7 +929,6 @@ export default function BallotPage() {
                   })}
               </div>
 
-              {/* Navigation */}
               <div className="flex gap-3">
                 {currentStep > 0 && (
                   <button
@@ -826,7 +964,6 @@ export default function BallotPage() {
             </div>
           )}
 
-          {/* REVIEW STEP */}
           {isReviewStep && ballot && (
             <div key={`review-${animKey}`} className="anim-slide">
               <div className="mb-8">
@@ -851,7 +988,6 @@ export default function BallotPage() {
                 </p>
               </div>
 
-              {/* Review cards */}
               <div className="space-y-3 mb-6">
                 {ballot.positions.map((position, idx) => {
                   const selectedIds = selections[position.id] || [];
@@ -929,7 +1065,6 @@ export default function BallotPage() {
                 })}
               </div>
 
-              {/* Error */}
               {error && (
                 <div
                   className="flex items-start gap-2.5 rounded-2xl p-4 mb-4"
@@ -948,7 +1083,6 @@ export default function BallotPage() {
                 </div>
               )}
 
-              {/* Warning */}
               <div
                 className="rounded-2xl p-4 mb-6"
                 style={{
@@ -965,7 +1099,6 @@ export default function BallotPage() {
                 </p>
               </div>
 
-              {/* Buttons */}
               <div className="flex gap-3">
                 <button
                   onClick={() => setCurrentStep(totalPositions - 1)}
@@ -1006,7 +1139,6 @@ export default function BallotPage() {
         </div>
       </div>
 
-      {/* Footer */}
       <div
         className="w-full px-6 py-4 flex items-center justify-between shrink-0"
         style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}

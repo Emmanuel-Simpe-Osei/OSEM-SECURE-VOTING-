@@ -98,6 +98,8 @@ export default function ElectionDetailPage() {
   const [showDuplicate, setShowDuplicate] = useState(false);
   const [duplicateTitle, setDuplicateTitle] = useState("");
   const [duplicateSlug, setDuplicateSlug] = useState("");
+  const [duplicateStartTime, setDuplicateStartTime] = useState("");
+  const [duplicateEndTime, setDuplicateEndTime] = useState("");
   const [duplicating, setDuplicating] = useState(false);
   const [duplicateError, setDuplicateError] = useState("");
 
@@ -247,12 +249,26 @@ export default function ElectionDetailPage() {
   function openDuplicateModal() {
     setDuplicateTitle(`${election?.title} (Copy)`);
     setDuplicateSlug((election?.slug || "") + "-copy");
+    setDuplicateStartTime("");
+    setDuplicateEndTime("");
     setDuplicateError("");
     setShowDuplicate(true);
   }
 
   async function handleDuplicate() {
     if (!duplicateTitle.trim() || !duplicateSlug.trim()) return;
+    if (!duplicateStartTime || !duplicateEndTime) {
+      setDuplicateError(
+        "Please set the start and end time for the new election.",
+      );
+      return;
+    }
+    const start = new Date(duplicateStartTime);
+    const end = new Date(duplicateEndTime);
+    if (end <= start) {
+      setDuplicateError("End time must be after start time.");
+      return;
+    }
     setDuplicating(true);
     setDuplicateError("");
     try {
@@ -262,6 +278,8 @@ export default function ElectionDetailPage() {
         body: JSON.stringify({
           title: duplicateTitle.trim(),
           slug: duplicateSlug.trim(),
+          start_time: start.toISOString(),
+          end_time: end.toISOString(),
         }),
       });
       const data = await res.json();
@@ -403,10 +421,11 @@ export default function ElectionDetailPage() {
           }}
         >
           <div
-            className="w-full max-w-sm rounded-3xl p-6 space-y-4"
+            className="w-full max-w-sm rounded-3xl p-6 space-y-4 overflow-y-auto"
             style={{
               background: "#0F2540",
               border: "1px solid rgba(255,255,255,0.12)",
+              maxHeight: "90vh",
             }}
           >
             <div className="flex items-center justify-between">
@@ -452,6 +471,7 @@ export default function ElectionDetailPage() {
             )}
 
             <div className="space-y-3">
+              {/* Title */}
               <div>
                 <label
                   className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -481,6 +501,8 @@ export default function ElectionDetailPage() {
                   autoFocus
                 />
               </div>
+
+              {/* Slug */}
               <div>
                 <label
                   className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -504,6 +526,50 @@ export default function ElectionDetailPage() {
                   }}
                 />
               </div>
+
+              {/* Start time */}
+              <div>
+                <label
+                  className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  New Start Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={duplicateStartTime}
+                  onChange={(e) => setDuplicateStartTime(e.target.value)}
+                  className="w-full px-3.5 py-3 rounded-xl text-sm outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#ffffff",
+                    colorScheme: "dark",
+                  }}
+                />
+              </div>
+
+              {/* End time */}
+              <div>
+                <label
+                  className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  New End Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={duplicateEndTime}
+                  onChange={(e) => setDuplicateEndTime(e.target.value)}
+                  className="w-full px-3.5 py-3 rounded-xl text-sm outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#ffffff",
+                    colorScheme: "dark",
+                  }}
+                />
+              </div>
             </div>
 
             <div className="flex gap-3">
@@ -520,7 +586,11 @@ export default function ElectionDetailPage() {
               <button
                 onClick={handleDuplicate}
                 disabled={
-                  duplicating || !duplicateTitle.trim() || !duplicateSlug.trim()
+                  duplicating ||
+                  !duplicateTitle.trim() ||
+                  !duplicateSlug.trim() ||
+                  !duplicateStartTime ||
+                  !duplicateEndTime
                 }
                 className="flex-1 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
                 style={{
@@ -901,7 +971,7 @@ export default function ElectionDetailPage() {
                 </p>
               )}
 
-              {/* Duplicate — available on any status */}
+              {/* Duplicate */}
               <button
                 onClick={openDuplicateModal}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
@@ -926,13 +996,12 @@ export default function ElectionDetailPage() {
               transition: "all 0.4s ease 0.3s",
             }}
           >
-            {/* Voter Register */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/voters`)}
               className="text-left transition-all active:scale-99 group"
             >
               <div
-                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200"
+                className="rounded-2xl p-5 flex items-center gap-4"
                 style={{
                   background: "rgba(255,255,255,0.05)",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -965,13 +1034,12 @@ export default function ElectionDetailPage() {
               </div>
             </button>
 
-            {/* Candidates & Positions */}
             <button
               onClick={() => router.push(`/admin/elections/${id}/candidates`)}
               className="text-left transition-all active:scale-99 group"
             >
               <div
-                className="rounded-2xl p-5 flex items-center gap-4 transition-all duration-200"
+                className="rounded-2xl p-5 flex items-center gap-4"
                 style={{
                   background: "rgba(255,255,255,0.05)",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -1006,7 +1074,6 @@ export default function ElectionDetailPage() {
               </div>
             </button>
 
-            {/* Pre-Election Checklist — draft/scheduled only */}
             {(election.status === "draft" ||
               election.status === "scheduled") && (
               <button
@@ -1051,7 +1118,6 @@ export default function ElectionDetailPage() {
               </button>
             )}
 
-            {/* Live Monitoring — active/paused only */}
             {(election.status === "active" || election.status === "paused") && (
               <button
                 onClick={() => router.push(`/admin/elections/${id}/monitoring`)}
@@ -1101,7 +1167,6 @@ export default function ElectionDetailPage() {
               </button>
             )}
 
-            {/* Voter Support — active/paused only */}
             {(election.status === "active" || election.status === "paused") && (
               <button
                 onClick={() => router.push(`/admin/elections/${id}/support`)}
@@ -1145,7 +1210,6 @@ export default function ElectionDetailPage() {
               </button>
             )}
 
-            {/* Results — closed/archived only */}
             {(election.status === "closed" ||
               election.status === "archived") && (
               <button
@@ -1262,8 +1326,7 @@ export default function ElectionDetailPage() {
                     className="text-xs mt-1.5"
                     style={{ color: "rgba(255,255,255,0.3)" }}
                   >
-                    Tip: Include the room number and what to bring (student ID
-                    or proof of registration for Level 100)
+                    Tip: Include the room number and what to bring
                   </p>
                 </div>
                 <div>
@@ -1393,8 +1456,8 @@ export default function ElectionDetailPage() {
                     className="text-xs mt-1.5"
                     style={{ color: "rgba(255,255,255,0.3)" }}
                   >
-                    Leave blank to open immediately. Eligibility check closes
-                    automatically when the election goes active.
+                    Leave blank to open immediately. Closes automatically when
+                    election goes active.
                   </p>
                 </div>
 

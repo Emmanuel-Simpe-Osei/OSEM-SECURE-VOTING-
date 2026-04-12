@@ -14,7 +14,7 @@ export async function POST(
   }
 
   const body = await request.json();
-  const { title, slug } = body;
+  const { title, slug, start_time, end_time } = body;
 
   if (!title?.trim() || !slug?.trim()) {
     return NextResponse.json(
@@ -28,6 +28,20 @@ export async function POST(
       {
         error: "Slug must only contain lowercase letters, numbers and hyphens.",
       },
+      { status: 400 },
+    );
+  }
+
+  if (!start_time || !end_time) {
+    return NextResponse.json(
+      { error: "Start and end time are required." },
+      { status: 400 },
+    );
+  }
+
+  if (new Date(end_time) <= new Date(start_time)) {
+    return NextResponse.json(
+      { error: "End time must be after start time." },
       { status: 400 },
     );
   }
@@ -51,7 +65,7 @@ export async function POST(
     .from("elections")
     .select(
       `
-      title, description, start_time, end_time,
+      title, description,
       results_visibility,
       session_verification_enabled,
       session_verification_message,
@@ -66,21 +80,21 @@ export async function POST(
     return NextResponse.json({ error: "Election not found." }, { status: 404 });
   }
 
-  // Create new election as draft — no voter list, no times copied
+  // Create new election as draft with new times
   const { data: newElection, error: electionError } = await supabaseServer
     .from("elections")
     .insert({
       title: title.trim(),
       slug: slug.trim(),
       description: source.description,
-      start_time: source.start_time,
-      end_time: source.end_time,
+      start_time: start_time,
+      end_time: end_time,
       results_visibility: source.results_visibility,
       status: "draft",
       session_verification_enabled: source.session_verification_enabled,
       session_verification_message: source.session_verification_message,
       available_sessions: source.available_sessions,
-      eligibility_check_enabled: false, // always starts disabled
+      eligibility_check_enabled: false,
       created_by: session.admin_id,
     })
     .select("id")
@@ -107,7 +121,6 @@ export async function POST(
 
   if (positions && positions.length > 0) {
     for (const position of positions) {
-      // Insert position
       const { data: newPosition, error: posError } = await supabaseServer
         .from("positions")
         .insert({
@@ -122,7 +135,6 @@ export async function POST(
 
       if (posError || !newPosition) continue;
 
-      // Insert candidates for this position
       const candidates = position.candidates ?? [];
       if (candidates.length > 0) {
         await supabaseServer.from("candidates").insert(
@@ -146,7 +158,6 @@ export async function POST(
     }
   }
 
-  // Audit log
   await supabaseServer.from("audit_logs").insert({
     actor_type: "admin",
     actor_id: session.admin_id,
@@ -157,6 +168,8 @@ export async function POST(
       source_election_id: id,
       new_title: title.trim(),
       new_slug: slug.trim(),
+      new_start_time: start_time,
+      new_end_time: end_time,
       positions_copied: positions?.length ?? 0,
     },
   });

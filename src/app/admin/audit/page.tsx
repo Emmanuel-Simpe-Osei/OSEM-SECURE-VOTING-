@@ -665,7 +665,6 @@ export default function AuditPage() {
                 );
               })}
 
-              {/* Load more */}
               {hasMore && (
                 <button
                   onClick={() => loadLogs(false)}

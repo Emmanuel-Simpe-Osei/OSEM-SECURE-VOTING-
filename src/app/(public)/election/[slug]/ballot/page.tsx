@@ -187,8 +187,8 @@ export default function BallotPage() {
 
   useEffect(() => {
     loadBallot();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryCount]);
-
   async function loadBallot() {
     setLoading(true);
     setImagesReady(false);

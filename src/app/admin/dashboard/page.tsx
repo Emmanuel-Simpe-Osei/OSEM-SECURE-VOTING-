@@ -181,6 +181,7 @@ export default function AdminDashboard() {
             <LogOut className="w-3.5 h-3.5" />
             Logout
           </button>
+
           <button
             onClick={() => router.push("/admin/settings")}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
@@ -192,6 +193,18 @@ export default function AdminDashboard() {
           >
             <Settings className="w-3.5 h-3.5" />
             Settings
+          </button>
+          <button
+            onClick={() => router.push("/admin/audit")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
+            style={{
+              background: "rgba(248,113,113,0.08)",
+              border: "1px solid rgba(248,113,113,0.2)",
+              color: "#F87171",
+            }}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Audit Log
           </button>
         </div>
       </div>

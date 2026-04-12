@@ -31,7 +31,7 @@ export async function GET(
     .select(
       `
       id, name, max_votes, sort_order,
-      candidates (id, full_name, status)
+      candidates (id, full_name, bio, photo_url, sort_order, status)
     `,
     )
     .eq("election_id", id)

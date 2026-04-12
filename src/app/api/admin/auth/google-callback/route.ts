@@ -2,9 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/db/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { generateToken } from "@/lib/security/hash";
+import { getSafeIPHash } from "@/lib/utils/ip";
+import {
+  checkRateLimit,
+  RATE_LIMITS,
+  rateLimitResponse,
+} from "@/lib/security/rateLimit";
 import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
+  // Rate limit — 10 attempts per IP per 5 min
+  const rl = await checkRateLimit(request, RATE_LIMITS.adminGoogleCallback);
+  if (!rl.allowed) {
+    // Can't return JSON here — this is a redirect endpoint
+    // Redirect to login with error instead
+    return NextResponse.redirect(
+      new URL("/admin/login?error=too_many_requests", request.url),
+    );
+  }
+
+  const ipHash = getSafeIPHash(request);
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
@@ -30,7 +47,6 @@ export async function GET(request: NextRequest) {
     const origin = request.nextUrl.origin;
     const redirectUri = `${origin}/api/admin/auth/google-callback`;
 
-    // Exchange code for tokens
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -51,12 +67,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get user info from Google
     const userRes = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
-      {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-      },
+      { headers: { Authorization: `Bearer ${tokens.access_token}` } },
     );
 
     const googleUser = await userRes.json();
@@ -75,12 +88,20 @@ export async function GET(request: NextRequest) {
     );
 
     if (!authUser) {
+      await supabaseServer.from("audit_logs").insert({
+        actor_type: "system",
+        actor_id: "unknown",
+        action: "ADMIN_LOGIN_GOOGLE_NOT_FOUND",
+        target_type: "admin",
+        target_id: email,
+        metadata: { email },
+        ip_hash: ipHash,
+      });
       return NextResponse.redirect(
         new URL("/admin/login?error=not_admin", request.url),
       );
     }
 
-    // Check admin_users table
     const { data: adminUser } = await supabaseServer
       .from("admin_users")
       .select("id, role, is_active")
@@ -88,12 +109,20 @@ export async function GET(request: NextRequest) {
       .single();
 
     if (!adminUser || !adminUser.is_active) {
+      await supabaseServer.from("audit_logs").insert({
+        actor_type: "system",
+        actor_id: authUser.id,
+        action: "ADMIN_LOGIN_GOOGLE_UNAUTHORIZED",
+        target_type: "admin",
+        target_id: email,
+        metadata: { email, is_active: adminUser?.is_active },
+        ip_hash: ipHash,
+      });
       return NextResponse.redirect(
         new URL("/admin/login?error=not_admin", request.url),
       );
     }
 
-    // Create admin iron-session
     const session = await getAdminSession();
     session.admin_id = authUser.id;
     session.email = email;
@@ -101,13 +130,11 @@ export async function GET(request: NextRequest) {
     session.session_id = generateToken(16);
     await session.save();
 
-    // Update last login
     await supabaseServer
       .from("admin_users")
       .update({ last_login_at: new Date().toISOString() })
       .eq("user_id", authUser.id);
 
-    // Audit log
     await supabaseServer.from("audit_logs").insert({
       actor_type: "admin",
       actor_id: authUser.id,
@@ -115,7 +142,7 @@ export async function GET(request: NextRequest) {
       target_type: "admin",
       target_id: authUser.id,
       metadata: { email, role: adminUser.role, method: "google_oauth" },
-      ip_hash: "server-side",
+      ip_hash: ipHash,
     });
 
     return NextResponse.redirect(new URL("/admin/dashboard", request.url));

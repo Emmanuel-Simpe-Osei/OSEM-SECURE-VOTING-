@@ -3,6 +3,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
 import { supabaseServer } from "@/lib/db/server";
 import { getStudentSession } from "@/lib/auth/session";
+import { getSafeIPHash } from "@/lib/utils/ip";
+import {
+  checkRateLimit,
+  RATE_LIMITS,
+  rateLimitResponse,
+} from "@/lib/security/rateLimit";
 
 export async function GET(
   request: NextRequest,
@@ -10,13 +16,11 @@ export async function GET(
 ) {
   const { slug } = await params;
 
-  // Must have Google session
   const googleSession = await getServerSession(authOptions);
   if (!googleSession?.user?.email) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  // Must have student iron-session
   const studentSession = await getStudentSession();
   if (!studentSession?.student_id) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
@@ -24,7 +28,6 @@ export async function GET(
 
   const email = googleSession.user.email.toLowerCase();
 
-  // Get election
   const { data: election } = await supabaseServer
     .from("elections")
     .select(
@@ -40,12 +43,10 @@ export async function GET(
     );
   }
 
-  // If verification not enabled — tell client to skip to ballot
   if (!election.session_verification_enabled) {
     return NextResponse.json({ session_verification_enabled: false });
   }
 
-  // Get voter
   const { data: voter } = await supabaseServer
     .from("voter_eligibility")
     .select(
@@ -91,13 +92,17 @@ export async function POST(
 ) {
   const { slug } = await params;
 
-  // Must have Google session
+  // Rate limit — 3 attempts per IP per 15 min
+  const rl = await checkRateLimit(request, RATE_LIMITS.sessionVerify);
+  if (!rl.allowed) return rateLimitResponse(rl);
+
+  const ipHash = getSafeIPHash(request);
+
   const googleSession = await getServerSession(authOptions);
   if (!googleSession?.user?.email) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  // Must have student iron-session
   const studentSession = await getStudentSession();
   if (!studentSession?.student_id) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
@@ -112,7 +117,6 @@ export async function POST(
     );
   }
 
-  // Sanitize input
   const allowedSessions = ["Morning", "Evening", "Weekend"];
   if (!allowedSessions.includes(selected_session)) {
     return NextResponse.json({ error: "Invalid session." }, { status: 400 });
@@ -120,7 +124,6 @@ export async function POST(
 
   const email = googleSession.user.email.toLowerCase();
 
-  // Get election
   const { data: election } = await supabaseServer
     .from("elections")
     .select(
@@ -143,7 +146,6 @@ export async function POST(
     );
   }
 
-  // Get voter
   const { data: voter } = await supabaseServer
     .from("voter_eligibility")
     .select("id, student_id, full_name, programme_session, has_voted")
@@ -152,7 +154,6 @@ export async function POST(
     .single();
 
   if (!voter) {
-    // Log suspicious attempt — email not in voter list
     await supabaseServer.from("audit_logs").insert({
       actor_type: "unknown",
       actor_id: email,
@@ -160,12 +161,9 @@ export async function POST(
       target_type: "election",
       target_id: election.id,
       metadata: { email, selected_session, slug },
-      ip_hash: "client-side",
+      ip_hash: ipHash,
     });
-
-    // Destroy session — no retry
     await studentSession.destroy();
-
     return NextResponse.json({
       verified: false,
       message:
@@ -178,11 +176,9 @@ export async function POST(
     return NextResponse.json({ error: "Already voted." }, { status: 409 });
   }
 
-  // Check session match
   const verified =
     voter.programme_session?.toLowerCase() === selected_session.toLowerCase();
 
-  // Log every attempt — success or failure
   await supabaseServer.from("audit_logs").insert({
     actor_type: "voter",
     actor_id: voter.student_id,
@@ -196,13 +192,11 @@ export async function POST(
       email,
       verified,
     },
-    ip_hash: "client-side",
+    ip_hash: ipHash,
   });
 
   if (!verified) {
-    // Destroy iron-session — no retry possible
     await studentSession.destroy();
-
     return NextResponse.json({
       verified: false,
       message:
@@ -211,7 +205,6 @@ export async function POST(
     });
   }
 
-  // Verified — mark session as verified
   studentSession.session_verified = true;
   await studentSession.save();
 

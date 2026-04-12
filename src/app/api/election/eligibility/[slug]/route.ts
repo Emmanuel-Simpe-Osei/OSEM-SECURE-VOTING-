@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
 import { supabaseServer } from "@/lib/db/server";
+import {
+  checkRateLimit,
+  RATE_LIMITS,
+  rateLimitResponse,
+} from "@/lib/security/rateLimit";
 
 export async function GET(
   request: NextRequest,
@@ -16,7 +21,6 @@ export async function GET(
 
   const email = googleSession.user.email.toLowerCase();
 
-  // Get election
   const { data: election } = await supabaseServer
     .from("elections")
     .select(
@@ -44,7 +48,6 @@ export async function GET(
     );
   }
 
-  // Check if eligibility window is open
   const now = new Date();
   if (
     election.eligibility_check_open_from &&
@@ -56,7 +59,6 @@ export async function GET(
     );
   }
 
-  // Don't allow check after election starts
   if (election.status === "active" || election.status === "closed") {
     return NextResponse.json(
       { error: "Eligibility check is closed. The election has started." },
@@ -64,7 +66,6 @@ export async function GET(
     );
   }
 
-  // Check if already checked
   const { data: existingCheck } = await supabaseServer
     .from("eligibility_checks")
     .select("id, result")
@@ -91,7 +92,6 @@ export async function GET(
     });
   }
 
-  // Get voter info
   const { data: voter } = await supabaseServer
     .from("voter_eligibility")
     .select(
@@ -132,6 +132,10 @@ export async function POST(
 ) {
   const { slug } = await params;
 
+  // Rate limit — 3 attempts per IP per 15 min
+  const rl = await checkRateLimit(request, RATE_LIMITS.eligibilityCheck);
+  if (!rl.allowed) return rateLimitResponse(rl);
+
   const googleSession = await getServerSession(authOptions);
   if (!googleSession?.user?.email) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
@@ -140,7 +144,6 @@ export async function POST(
   const email = googleSession.user.email.toLowerCase();
   const { selected_session } = await request.json();
 
-  // Get election
   const { data: election } = await supabaseServer
     .from("elections")
     .select(
@@ -166,7 +169,6 @@ export async function POST(
     );
   }
 
-  // Check if already checked — prevent multiple attempts
   const { data: existingCheck } = await supabaseServer
     .from("eligibility_checks")
     .select("id, result")
@@ -181,7 +183,6 @@ export async function POST(
     });
   }
 
-  // Get voter
   const { data: voter } = await supabaseServer
     .from("voter_eligibility")
     .select(
@@ -191,7 +192,6 @@ export async function POST(
     .eq("school_email", email)
     .single();
 
-  // Not found in DB
   if (!voter || !voter.eligible) {
     await supabaseServer.from("eligibility_checks").insert({
       election_id: election.id,
@@ -210,7 +210,6 @@ export async function POST(
     });
   }
 
-  // Already voted
   if (voter.has_voted) {
     await supabaseServer.from("eligibility_checks").insert({
       election_id: election.id,
@@ -224,7 +223,6 @@ export async function POST(
     return NextResponse.json({ result: "already_voted" });
   }
 
-  // Session verification check
   if (election.session_verification_enabled && selected_session) {
     const allowedSessions = ["Morning", "Evening", "Weekend"];
     if (!allowedSessions.includes(selected_session)) {
@@ -235,7 +233,6 @@ export async function POST(
       voter.programme_session?.toLowerCase() === selected_session.toLowerCase();
 
     if (!sessionMatch) {
-      // Log failed attempt — no retry
       await supabaseServer.from("eligibility_checks").insert({
         election_id: election.id,
         student_id: voter.student_id,
@@ -258,7 +255,6 @@ export async function POST(
     }
   }
 
-  // All checks passed — eligible
   await supabaseServer.from("eligibility_checks").insert({
     election_id: election.id,
     student_id: voter.student_id,

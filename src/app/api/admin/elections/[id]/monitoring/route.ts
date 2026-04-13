@@ -13,6 +13,21 @@ export async function GET(
 
   const { id } = await params;
 
+  // Ownership check — monitoring exposes voter PII (names, timestamps)
+  const { data: ownership } = await supabaseServer
+    .from("elections")
+    .select("created_by")
+    .eq("id", id)
+    .single();
+
+  if (!ownership) {
+    return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+
+  if (session.role !== "super_admin" && ownership.created_by !== session.admin_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const [electionRes, totalRes, votedRes, activityRes] = await Promise.all([
     supabaseServer
       .from("elections")

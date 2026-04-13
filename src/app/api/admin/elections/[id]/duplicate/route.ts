@@ -60,7 +60,7 @@ export async function POST(
     );
   }
 
-  // Load source election
+  // Load source election — also fetch created_by for ownership check
   const { data: source } = await supabaseServer
     .from("elections")
     .select(
@@ -70,7 +70,8 @@ export async function POST(
       session_verification_enabled,
       session_verification_message,
       available_sessions,
-      eligibility_check_enabled
+      eligibility_check_enabled,
+      created_by
     `,
     )
     .eq("id", id)
@@ -78,6 +79,10 @@ export async function POST(
 
   if (!source) {
     return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+
+  if (session.role !== "super_admin" && source.created_by !== session.admin_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Create new election as draft with new times

@@ -23,6 +23,21 @@ export async function GET(
     );
   }
 
+  // Ownership check — this endpoint returns full voter PII
+  const { data: election } = await supabaseServer
+    .from("elections")
+    .select("created_by")
+    .eq("id", electionId)
+    .single();
+
+  if (!election) {
+    return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+
+  if (session.role !== "super_admin" && election.created_by !== session.admin_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { searchParams } = new URL(request.url);
   const page = Math.max(0, parseInt(searchParams.get("page") ?? "0") || 0);
   const limit = Math.min(

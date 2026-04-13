@@ -32,6 +32,11 @@ const GENERIC_ERROR = {
 export async function POST(request: NextRequest) {
   try {
     // ── Step 1: Parse and validate input ───────────────────────────
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > 10 * 1024) {
+      return NextResponse.json(GENERIC_ERROR, { status: 413 });
+    }
+
     const body = await request.json();
     const parsed = verifyOTPSchema.safeParse(body);
 

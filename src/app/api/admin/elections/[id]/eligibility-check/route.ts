@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
+import { z } from "zod";
+
+const UUID = z.uuid();
+
+const patchSchema = z.object({
+  enabled: z.boolean(),
+  open_from: z.iso.datetime({ offset: true }).nullable().optional(),
+});
 
 export async function PATCH(
   request: NextRequest,
@@ -13,16 +21,21 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  const body = await request.json();
-  const { enabled, open_from } = body;
+  if (!UUID.safeParse(id).success) {
+    return NextResponse.json({ error: "Invalid election ID." }, { status: 400 });
+  }
 
-  if (typeof enabled !== "boolean") {
+  const body = await request.json();
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
+  const { enabled, open_from } = parsed.data;
+
   const { data: election } = await supabaseServer
     .from("elections")
-    .select("id, title")
+    .select("id, title, created_by")
     .eq("id", id)
     .single();
 
@@ -30,11 +43,15 @@ export async function PATCH(
     return NextResponse.json({ error: "Election not found." }, { status: 404 });
   }
 
+  if (session.role !== "super_admin" && election.created_by !== session.admin_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { error } = await supabaseServer
     .from("elections")
     .update({
       eligibility_check_enabled: enabled,
-      eligibility_check_open_from: open_from || null,
+      eligibility_check_open_from: open_from ?? null,
     })
     .eq("id", id);
 
@@ -45,15 +62,13 @@ export async function PATCH(
   await supabaseServer.from("audit_logs").insert({
     actor_type: "admin",
     actor_id: session.admin_id,
-    action: enabled
-      ? "eligibility_check_enabled"
-      : "eligibility_check_disabled",
+    action: enabled ? "eligibility_check_enabled" : "eligibility_check_disabled",
     target_type: "election",
     target_id: id,
     metadata: {
       election_title: election.title,
       enabled,
-      open_from: open_from || null,
+      open_from: open_from ?? null,
     },
   });
 
@@ -81,6 +96,24 @@ export async function GET(
   const session = await getAdminSession();
   if (!session.admin_id) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  if (!UUID.safeParse(id).success) {
+    return NextResponse.json({ error: "Invalid election ID." }, { status: 400 });
+  }
+
+  const { data: election } = await supabaseServer
+    .from("elections")
+    .select("created_by")
+    .eq("id", id)
+    .single();
+
+  if (!election) {
+    return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+
+  if (session.role !== "super_admin" && election.created_by !== session.admin_id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { data: checks } = await supabaseServer

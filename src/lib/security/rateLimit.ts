@@ -1,6 +1,6 @@
 import { Redis } from "@upstash/redis";
 import { NextRequest } from "next/server";
-import { getClientIP } from "@/lib/utils/ip";
+import { getClientIP, getSafeIPHash } from "@/lib/utils/ip";
 import { supabaseServer } from "@/lib/db/server";
 
 const redis = new Redis({
@@ -39,7 +39,7 @@ export async function checkRateLimit(
     const allowed = count <= config.limit;
 
     if (count === config.limit + 1) {
-      await flagSuspiciousActivity(request, ip, config.prefix, count);
+      await flagSuspiciousActivity(request, config.prefix, count);
     }
 
     return {
@@ -56,18 +56,18 @@ export async function checkRateLimit(
 
 async function flagSuspiciousActivity(
   request: NextRequest,
-  ip: string,
   action: string,
   attemptCount: number,
 ) {
   try {
+    const ipHash = getSafeIPHash(request);
     const userAgent = request.headers.get("user-agent") ?? "unknown";
     await supabaseServer.from("audit_logs").insert({
       actor_type: "system",
       actor_id: "rate_limiter",
       action: "RATE_LIMIT_EXCEEDED",
       target_type: "ip",
-      target_id: ip.substring(0, 8) + "****",
+      target_id: ipHash,
       metadata: {
         prefix: action,
         attempt_count: attemptCount,
@@ -75,7 +75,7 @@ async function flagSuspiciousActivity(
         path: request.nextUrl.pathname,
         flagged_at: new Date().toISOString(),
       },
-      ip_hash: ip,
+      ip_hash: ipHash,
     });
   } catch {
     // Non-blocking

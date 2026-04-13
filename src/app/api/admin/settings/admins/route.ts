@@ -4,7 +4,7 @@ import { supabaseServer } from "@/lib/db/server";
 import { z } from "zod";
 
 const addAdminSchema = z.object({
-  email: z.string().email().min(5).max(255),
+  email: z.email().min(5).max(255),
   role: z.enum(["admin", "super_admin"]),
 });
 

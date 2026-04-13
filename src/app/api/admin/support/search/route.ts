@@ -13,6 +13,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
+  if (session.role !== "super_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { searchParams } = new URL(request.url);
   const electionId = searchParams.get("election_id");
   const q = searchParams.get("q")?.trim();

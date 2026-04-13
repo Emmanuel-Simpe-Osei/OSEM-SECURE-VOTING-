@@ -7,8 +7,8 @@ const ALLOWED_EMAIL_DOMAIN =
   process.env.ALLOWED_EMAIL_DOMAIN || "upsamail.edu.gh";
 
 const updateEmailSchema = z.object({
-  voter_id: z.string().uuid(),
-  election_id: z.string().uuid(),
+  voter_id: z.uuid(),
+  election_id: z.uuid(),
   new_email: z
     .string()
     .email()

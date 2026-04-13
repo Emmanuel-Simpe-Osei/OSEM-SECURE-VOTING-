@@ -3,7 +3,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
 import { z } from "zod";
 
-const uuidSchema = z.string().uuid();
+const uuidSchema = z.uuid();
 
 export async function DELETE(
   request: NextRequest,

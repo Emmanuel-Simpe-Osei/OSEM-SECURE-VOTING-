@@ -5,9 +5,9 @@ import { z } from "zod";
 
 const resetSchema = z
   .object({
-    election_id: z.string().uuid(),
+    election_id: z.uuid(),
     student_id: z.string().optional(),
-    school_email: z.string().email().optional(),
+    school_email: z.email().optional(),
     reason: z.string().min(5).max(500),
   })
   .refine((data) => data.student_id || data.school_email, {

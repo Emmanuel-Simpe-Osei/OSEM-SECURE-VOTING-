@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
+import { getSafeIPHash } from "@/lib/utils/ip";
 import { z } from "zod";
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -34,6 +35,14 @@ export async function PATCH(
 
   const { id } = await params;
 
+  if (!z.uuid().safeParse(id).success) {
+    return NextResponse.json(
+      { error: "Invalid election ID." },
+      { status: 400 },
+    );
+  }
+
+  const ipHash = getSafeIPHash(request);
   const body = await request.json();
   const parsed = statusSchema.safeParse(body);
   if (!parsed.success) {
@@ -42,10 +51,9 @@ export async function PATCH(
 
   const newStatus = parsed.data.status;
 
-  // Get current status
   const { data: election } = await supabaseServer
     .from("elections")
-    .select("status")
+    .select("status, created_by")
     .eq("id", id)
     .single();
 
@@ -53,7 +61,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Election not found." }, { status: 404 });
   }
 
-  // Validate transition
+  if (
+    session.role !== "super_admin" &&
+    election.created_by !== session.admin_id
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const allowed = VALID_TRANSITIONS[election.status] || [];
   if (!allowed.includes(newStatus)) {
     return NextResponse.json(
@@ -64,7 +78,6 @@ export async function PATCH(
     );
   }
 
-  // Update status
   const { error } = await supabaseServer
     .from("elections")
     .update({ status: newStatus })
@@ -77,15 +90,14 @@ export async function PATCH(
     );
   }
 
-  // Write audit log
   await supabaseServer.from("audit_logs").insert({
     actor_type: "admin",
     actor_id: session.admin_id,
-    action: `ELECTION_STATUS_CHANGED`,
+    action: "ELECTION_STATUS_CHANGED",
     target_type: "election",
     target_id: id,
     metadata: { from: election.status, to: newStatus },
-    ip_hash: "server-side",
+    ip_hash: ipHash,
   });
 
   return NextResponse.json({ success: true, status: newStatus });

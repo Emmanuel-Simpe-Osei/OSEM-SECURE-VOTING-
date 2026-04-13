@@ -1,7 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
+import { getSafeIPHash } from "@/lib/utils/ip";
 import { z } from "zod";
+
+const UUID = z.uuid();
+
+// Restrict photo_url to the app's own Supabase Storage bucket only
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const STORAGE_ORIGIN = supabaseUrl ? new URL(supabaseUrl).origin : "";
+
+const photoUrlSchema = z
+  .url()
+  .refine(
+    (url) =>
+      !STORAGE_ORIGIN || url.startsWith(`${STORAGE_ORIGIN}/storage/`),
+    { message: "Photo must be hosted in app storage." },
+  )
+  .nullable()
+  .optional();
+
+/**
+ * Returns the election row if the admin is the creator or a super_admin.
+ * Returns null if the election doesn't exist.
+ * Returns "forbidden" if the election belongs to a different admin.
+ */
+async function getOwnedElection(
+  electionId: string,
+  adminId: string,
+  role: string,
+) {
+  const { data: election } = await supabaseServer
+    .from("elections")
+    .select("status, created_by")
+    .eq("id", electionId)
+    .single();
+
+  if (!election) return null;
+  if (role !== "super_admin" && election.created_by !== adminId)
+    return "forbidden" as const;
+  return election;
+}
 
 export async function POST(
   request: NextRequest,
@@ -13,6 +52,18 @@ export async function POST(
   }
 
   const { id: electionId } = await params;
+  if (!UUID.safeParse(electionId).success) {
+    return NextResponse.json({ error: "Invalid election ID." }, { status: 400 });
+  }
+
+  const owned = await getOwnedElection(electionId, session.admin_id, session.role);
+  if (owned === null) {
+    return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+  if (owned === "forbidden") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await request.json();
 
   if (body.type === "position") {
@@ -51,10 +102,10 @@ export async function POST(
 
   if (body.type === "candidate") {
     const schema = z.object({
-      position_id: z.string(),
+      position_id: z.uuid(),
       full_name: z.string().min(1).max(200),
       bio: z.string().nullable().optional(),
-      photo_url: z.string().nullable().optional(),
+      photo_url: photoUrlSchema,
       sort_order: z.number(),
     });
     const parsed = schema.safeParse(body);
@@ -98,13 +149,35 @@ export async function PATCH(
   }
 
   const { id: electionId } = await params;
+  if (!UUID.safeParse(electionId).success) {
+    return NextResponse.json({ error: "Invalid election ID." }, { status: 400 });
+  }
+
+  const ipHash = getSafeIPHash(request);
   const body = await request.json();
 
   if (body.type === "position_order") {
+    if (!UUID.safeParse(body.position_id).success) {
+      return NextResponse.json(
+        { error: "Invalid position ID." },
+        { status: 400 },
+      );
+    }
+
+    // Ownership check: position must belong to this admin's election
+    const owned = await getOwnedElection(electionId, session.admin_id, session.role);
+    if (owned === null) {
+      return NextResponse.json({ error: "Election not found." }, { status: 404 });
+    }
+    if (owned === "forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { error } = await supabaseServer
       .from("positions")
       .update({ sort_order: body.sort_order })
-      .eq("id", body.position_id);
+      .eq("id", body.position_id)
+      .eq("election_id", electionId);
     if (error) {
       return NextResponse.json(
         { error: "Failed to update order." },
@@ -115,10 +188,9 @@ export async function PATCH(
   }
 
   if (body.type === "candidate_edit") {
-    // Block edits if election is active or beyond
     const { data: election } = await supabaseServer
       .from("elections")
-      .select("status")
+      .select("status, created_by")
       .eq("id", electionId)
       .single();
 
@@ -127,6 +199,13 @@ export async function PATCH(
         { error: "Election not found." },
         { status: 404 },
       );
+    }
+
+    if (
+      session.role !== "super_admin" &&
+      election.created_by !== session.admin_id
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const lockedStatuses = ["active", "paused", "closed", "archived"];
@@ -138,10 +217,10 @@ export async function PATCH(
     }
 
     const schema = z.object({
-      candidate_id: z.string(),
+      candidate_id: z.uuid(),
       full_name: z.string().min(1).max(200),
       bio: z.string().nullable().optional(),
-      photo_url: z.string().nullable().optional(),
+      photo_url: photoUrlSchema,
     });
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
@@ -159,6 +238,7 @@ export async function PATCH(
         photo_url: parsed.data.photo_url ?? null,
       })
       .eq("id", parsed.data.candidate_id)
+      .eq("election_id", electionId)
       .select("id, full_name, bio, photo_url, sort_order")
       .single();
 
@@ -169,17 +249,14 @@ export async function PATCH(
       );
     }
 
-    // Audit log
     await supabaseServer.from("audit_logs").insert({
       actor_type: "admin",
       actor_id: session.admin_id,
-      action: "candidate_edited",
+      action: "CANDIDATE_EDITED",
       target_type: "candidate",
       target_id: parsed.data.candidate_id,
-      metadata: {
-        election_id: electionId,
-        full_name: parsed.data.full_name,
-      },
+      metadata: { election_id: electionId, full_name: parsed.data.full_name },
+      ip_hash: ipHash,
     });
 
     return NextResponse.json(data);
@@ -197,22 +274,77 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
+  const { id: electionId } = await params;
+  if (!UUID.safeParse(electionId).success) {
+    return NextResponse.json({ error: "Invalid election ID." }, { status: 400 });
+  }
+
+  const ipHash = getSafeIPHash(request);
+
+  const owned = await getOwnedElection(electionId, session.admin_id, session.role);
+  if (owned === null) {
+    return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+  if (owned === "forbidden") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await request.json();
 
   if (body.type === "position") {
+    if (!UUID.safeParse(body.position_id).success) {
+      return NextResponse.json(
+        { error: "Invalid position ID." },
+        { status: 400 },
+      );
+    }
     await supabaseServer
       .from("candidates")
       .delete()
-      .eq("position_id", body.position_id);
-    await supabaseServer.from("positions").delete().eq("id", body.position_id);
+      .eq("position_id", body.position_id)
+      .eq("election_id", electionId);
+    await supabaseServer
+      .from("positions")
+      .delete()
+      .eq("id", body.position_id)
+      .eq("election_id", electionId);
+
+    await supabaseServer.from("audit_logs").insert({
+      actor_type: "admin",
+      actor_id: session.admin_id,
+      action: "POSITION_DELETED",
+      target_type: "position",
+      target_id: body.position_id,
+      metadata: { election_id: electionId },
+      ip_hash: ipHash,
+    });
+
     return NextResponse.json({ success: true });
   }
 
   if (body.type === "candidate") {
+    if (!UUID.safeParse(body.candidate_id).success) {
+      return NextResponse.json(
+        { error: "Invalid candidate ID." },
+        { status: 400 },
+      );
+    }
     await supabaseServer
       .from("candidates")
       .delete()
-      .eq("id", body.candidate_id);
+      .eq("id", body.candidate_id)
+      .eq("election_id", electionId);
+
+    await supabaseServer.from("audit_logs").insert({
+      actor_type: "admin",
+      actor_id: session.admin_id,
+      action: "CANDIDATE_DELETED",
+      target_type: "candidate",
+      target_id: body.candidate_id,
+      metadata: { election_id: electionId },
+      ip_hash: ipHash,
+    });
+
     return NextResponse.json({ success: true });
   }
 

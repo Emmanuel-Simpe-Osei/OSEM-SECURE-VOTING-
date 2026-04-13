@@ -4,12 +4,12 @@ import { supabaseServer } from "@/lib/db/server";
 import { z } from "zod";
 
 const uploadSchema = z.object({
-  election_id: z.string().uuid(),
+  election_id: z.uuid(),
   voters: z
     .array(
       z.object({
         student_id: z.string().min(1).max(50),
-        school_email: z.string().email().max(255),
+        school_email: z.email().max(255),
         full_name: z.string().min(1).max(255),
         department: z.string().max(255).nullable().optional(),
         level: z.string().max(50).nullable().optional(),
@@ -41,12 +41,19 @@ export async function POST(request: NextRequest) {
 
   const { data: election } = await supabaseServer
     .from("elections")
-    .select("id, status")
+    .select("id, status, created_by")
     .eq("id", election_id)
     .single();
 
   if (!election) {
     return NextResponse.json({ error: "Election not found." }, { status: 404 });
+  }
+
+  if (
+    session.role !== "super_admin" &&
+    election.created_by !== session.admin_id
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (election.status === "closed" || election.status === "archived") {

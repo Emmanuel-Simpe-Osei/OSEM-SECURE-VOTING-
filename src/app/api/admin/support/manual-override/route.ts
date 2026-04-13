@@ -5,8 +5,8 @@ import crypto from "crypto";
 import { z } from "zod";
 
 const overrideSchema = z.object({
-  voter_id: z.string().uuid(),
-  election_id: z.string().uuid(),
+  voter_id: z.uuid(),
+  election_id: z.uuid(),
   student_id: z.string().min(1),
   reason: z.string().min(5).max(500),
 });

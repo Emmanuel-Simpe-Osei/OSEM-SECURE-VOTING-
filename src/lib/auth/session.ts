@@ -39,7 +39,7 @@ const studentSessionOptions: SessionOptions = {
   cookieName: "osem_vote_session",
   cookieOptions: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     sameSite: "strict",
     maxAge: 60 * 60 * 4,
   },
@@ -50,7 +50,7 @@ const adminSessionOptions: SessionOptions = {
   cookieName: "osem_admin_session",
   cookieOptions: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     sameSite: "strict",
     maxAge: 60 * 60 * 8,
   },

@@ -46,6 +46,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > 50 * 1024) {
+      return NextResponse.json({ error: "Request too large." }, { status: 413 });
+    }
+
     const body = await request.json();
     const parsed = submitSchema.safeParse(body);
     if (!parsed.success) {

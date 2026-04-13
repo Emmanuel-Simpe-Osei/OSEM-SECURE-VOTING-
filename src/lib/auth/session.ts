@@ -51,7 +51,7 @@ const adminSessionOptions: SessionOptions = {
   cookieOptions: {
     httpOnly: true,
     secure: true,
-    sameSite: "strict",
+    sameSite: "lax",
     maxAge: 60 * 60 * 8,
   },
 };

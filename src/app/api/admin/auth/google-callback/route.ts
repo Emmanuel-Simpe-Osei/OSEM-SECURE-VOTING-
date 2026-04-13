@@ -12,7 +12,7 @@ import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
   const rl = await checkRateLimit(request, RATE_LIMITS.adminGoogleCallback);
-  if (!rl.success) {
+  if (!rl.allowed) {
     return NextResponse.redirect(
       new URL("/admin/login?error=too_many_requests", request.url),
     );

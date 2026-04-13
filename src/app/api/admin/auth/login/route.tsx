@@ -16,7 +16,6 @@ const loginSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  // Rate limit — 5 attempts per IP per 15 min
   const rl = await checkRateLimit(request, RATE_LIMITS.adminLogin);
   if (!rl.allowed) return rateLimitResponse(rl);
 
@@ -38,14 +37,13 @@ export async function POST(request: NextRequest) {
       await supabaseServer.auth.signInWithPassword({ email, password });
 
     if (authError || !authData.user) {
-      // Log failed attempt
       await supabaseServer.from("audit_logs").insert({
         actor_type: "system",
         actor_id: "unknown",
         action: "ADMIN_LOGIN_FAILED",
         target_type: "admin",
         target_id: email,
-        metadata: { email, reason: "invalid_credentials" },
+        metadata: { reason: "invalid_credentials" },
         ip_hash: ipHash,
       });
       return NextResponse.json(
@@ -66,8 +64,8 @@ export async function POST(request: NextRequest) {
         actor_id: "unknown",
         action: "ADMIN_LOGIN_UNAUTHORIZED",
         target_type: "admin",
-        target_id: email,
-        metadata: { email },
+        target_id: "redacted",
+        metadata: { reason: "account_inactive_or_not_found" },
         ip_hash: ipHash,
       });
       return NextResponse.json(
@@ -94,13 +92,12 @@ export async function POST(request: NextRequest) {
       action: "ADMIN_LOGIN_SUCCESS",
       target_type: "admin",
       target_id: authData.user.id,
-      metadata: { email, role: adminUser.role },
+      metadata: { role: adminUser.role },
       ip_hash: ipHash,
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("[admin/auth/login] unexpected error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },
       { status: 500 },

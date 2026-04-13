@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (otpError) {
-      console.error("[request-otp] Failed to store OTP:", otpError);
+      
       return NextResponse.json(
         { error: "Something went wrong. Please try again." },
         { status: 500 },
@@ -183,7 +183,7 @@ export async function POST(request: NextRequest) {
         voter.school_email.split("@")[1],
     });
   } catch (error) {
-    console.error("[request-otp] Unexpected error:", error);
+    
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },
       { status: 500 },

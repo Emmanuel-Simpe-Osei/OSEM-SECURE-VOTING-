@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (verifyError) {
-      console.error("[verify-otp] RPC error:", verifyError);
+      
       return NextResponse.json(GENERIC_ERROR, { status: 500 });
     }
 
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
       redirect: `/election/${election_slug}/ballot`,
     });
   } catch (error) {
-    console.error("[verify-otp] Unexpected error:", error);
+    
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },
       { status: 500 },

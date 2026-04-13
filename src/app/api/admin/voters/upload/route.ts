@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       .select("id");
 
     if (error) {
-      console.error("[voters/upload]", error);
+      
       return NextResponse.json(
         { error: "Failed to upload voters." },
         { status: 500 },

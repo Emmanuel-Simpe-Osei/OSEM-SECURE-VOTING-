@@ -19,13 +19,11 @@ const submitSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Step 1: Verify session
     const session = await getStudentSession();
     if (!session?.student_id) {
       return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
     }
 
-    // Step 2: Rate limit
     const studentLimit = await checkRateLimit(
       voteSubmitLimiter,
       `student:${session.student_id}`,
@@ -48,16 +46,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 3: Parse body and log BEFORE validation
     const body = await request.json();
-    console.log("[vote/submit] raw body:", JSON.stringify(body, null, 2));
-
     const parsed = submitSchema.safeParse(body);
     if (!parsed.success) {
-      console.log(
-        "[vote/submit] validation errors:",
-        JSON.stringify(parsed.error.issues, null, 2),
-      );
       return NextResponse.json(
         { error: "Invalid submission data." },
         { status: 400 },
@@ -67,7 +58,6 @@ export async function POST(request: NextRequest) {
     const { token, selections } = parsed.data;
     const ipHash = getSafeIPHash(request);
 
-    // Step 4: Call the atomic RPC
     const { data, error } = await supabaseServer.rpc("submit_vote_rpc", {
       p_election_id: session.election_id,
       p_student_id: session.student_id,
@@ -77,8 +67,6 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      console.error("[vote/submit] RPC error:", error);
-
       if (error.message.includes("ALREADY_VOTED")) {
         return NextResponse.json(
           { error: "You have already voted in this election." },
@@ -109,14 +97,12 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-
       return NextResponse.json(
         { error: "Something went wrong. Please try again." },
         { status: 500 },
       );
     }
 
-    // Step 5: Destroy session after successful vote
     session.destroy();
 
     return NextResponse.json({
@@ -124,8 +110,7 @@ export async function POST(request: NextRequest) {
       confirmation_code: data.confirmation_code,
       submitted_at: data.submitted_at,
     });
-  } catch (error) {
-    console.error("[vote/submit] Unexpected error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },
       { status: 500 },

@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    console.error("[admin/elections POST]", error);
+    
     return NextResponse.json(
       { error: "Failed to create election." },
       { status: 500 },

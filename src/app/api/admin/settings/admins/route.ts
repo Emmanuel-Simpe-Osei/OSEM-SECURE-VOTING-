@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    console.log("[add-admin] insert error:", error);
+    
     return NextResponse.json(
       { error: "Failed to add admin." },
       { status: 500 },

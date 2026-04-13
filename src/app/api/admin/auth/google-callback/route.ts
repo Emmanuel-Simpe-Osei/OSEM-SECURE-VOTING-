@@ -147,7 +147,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.redirect(new URL("/admin/dashboard", request.url));
   } catch (err) {
-    console.error("[admin/google-callback]", err);
+    
     return NextResponse.redirect(
       new URL("/admin/login?error=google_failed", request.url),
     );

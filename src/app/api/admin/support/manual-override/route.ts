@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
 import crypto from "crypto";
+import { z } from "zod";
+
+const overrideSchema = z.object({
+  voter_id: z.string().uuid(),
+  election_id: z.string().uuid(),
+  student_id: z.string().min(1),
+  reason: z.string().min(5).max(500),
+});
 
 export async function POST(request: NextRequest) {
   const session = await getAdminSession();
@@ -9,38 +17,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  const body = await request.json();
-  const { voter_id, election_id, student_id, reason } = body;
+  // Only super_admin can override votes
+  if (session.role !== "super_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  if (!voter_id || !election_id || !reason?.trim()) {
+  const body = await request.json();
+  const parsed = overrideSchema.safeParse(body);
+  if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input." }, { status: 400 });
   }
 
-  // Check voter hasn't already voted
+  const { voter_id, election_id, student_id, reason } = parsed.data;
+
   const { data: voter } = await supabaseServer
     .from("voter_eligibility")
     .select("has_voted, full_name")
     .eq("id", voter_id)
+    .eq("election_id", election_id)
     .single();
 
-  if (voter?.has_voted) {
+  if (!voter) {
+    return NextResponse.json({ error: "Voter not found." }, { status: 404 });
+  }
+
+  if (voter.has_voted) {
     return NextResponse.json(
       { error: "This voter has already voted." },
       { status: 409 },
     );
   }
 
-  // Generate a bypass code for the record
   const bypass_code = crypto.randomBytes(4).toString("hex").toUpperCase();
   const now = new Date().toISOString();
 
-  // Mark as voted
   const { error } = await supabaseServer
     .from("voter_eligibility")
-    .update({
-      has_voted: true,
-      voted_at: now,
-    })
+    .update({ has_voted: true, voted_at: now })
     .eq("id", voter_id)
     .eq("election_id", election_id);
 
@@ -51,7 +64,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Full audit log
   await supabaseServer.from("audit_logs").insert({
     actor_type: "admin",
     actor_id: session.admin_id,

@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
 
+// Escape special ILIKE characters to prevent pattern injection
+function escapeLike(str: string): string {
+  return str.replace(/[%_\\]/g, "\\$&");
+}
+
 export async function GET(request: NextRequest) {
   const session = await getAdminSession();
   if (!session?.admin_id) {
@@ -12,9 +17,12 @@ export async function GET(request: NextRequest) {
   const electionId = searchParams.get("election_id");
   const q = searchParams.get("q")?.trim();
 
-  if (!electionId || !q) {
+  if (!electionId || !q || q.length < 2) {
     return NextResponse.json({ voters: [] });
   }
+
+  // Sanitize query length and escape ILIKE special chars
+  const safeQ = escapeLike(q.slice(0, 100));
 
   const { data: voters } = await supabaseServer
     .from("voter_eligibility")
@@ -23,7 +31,7 @@ export async function GET(request: NextRequest) {
     )
     .eq("election_id", electionId)
     .or(
-      `student_id.ilike.%${q}%,full_name.ilike.%${q}%,school_email.ilike.%${q}%`,
+      `student_id.ilike.%${safeQ}%,full_name.ilike.%${safeQ}%,school_email.ilike.%${safeQ}%`,
     )
     .limit(10);
 

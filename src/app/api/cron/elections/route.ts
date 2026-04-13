@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/db/server";
 
 export async function GET(request: NextRequest) {
-  // Verify this is called by Vercel cron — not a random request
+  const cronSecret = process.env.CRON_SECRET;
+
+  // CRITICAL: Reject if CRON_SECRET is not configured
+  if (!cronSecret) {
+    return NextResponse.json({ error: "Cron not configured" }, { status: 500 });
+  }
+
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
@@ -15,7 +21,7 @@ export async function GET(request: NextRequest) {
     errors: [] as string[],
   };
 
-  // ── Auto-start scheduled elections ───────────────────────────────
+  // Auto-start scheduled elections
   const { data: toStart, error: startFetchError } = await supabaseServer
     .from("elections")
     .select("id, title, slug")
@@ -52,7 +58,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ── Auto-close active elections ───────────────────────────────────
+  // Auto-close active/paused elections
   const { data: toClose, error: closeFetchError } = await supabaseServer
     .from("elections")
     .select("id, title, slug")

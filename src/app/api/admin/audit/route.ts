@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
 
+function escapeLike(str: string): string {
+  return str.replace(/[%_\\]/g, "\\$&");
+}
+
 export async function GET(request: NextRequest) {
   const session = await getAdminSession();
   if (!session.admin_id) {
@@ -31,8 +35,9 @@ export async function GET(request: NextRequest) {
   }
 
   if (q) {
+    const safeQ = escapeLike(q.slice(0, 100));
     query = query.or(
-      `actor_id.ilike.%${q}%,action.ilike.%${q}%,target_id.ilike.%${q}%`,
+      `actor_id.ilike.%${safeQ}%,action.ilike.%${safeQ}%,target_id.ilike.%${safeQ}%`,
     );
   }
 

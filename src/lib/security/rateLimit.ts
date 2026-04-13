@@ -9,22 +9,17 @@ const redis = new Redis({
 });
 
 export interface RateLimitConfig {
-  prefix: string; // e.g. "admin_login"
-  limit: number; // max attempts
-  windowSeconds: number; // sliding window in seconds
+  prefix: string;
+  limit: number;
+  windowSeconds: number;
 }
 
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
-  resetIn: number; // seconds until window resets
+  resetIn: number;
 }
 
-/**
- * Sliding window rate limiter using Upstash Redis.
- * Key: prefix:ip
- * Uses INCR + EXPIRE — atomic, fast, serverless-safe.
- */
 export async function checkRateLimit(
   request: NextRequest,
   config: RateLimitConfig,
@@ -33,20 +28,16 @@ export async function checkRateLimit(
   const key = `rl:${config.prefix}:${ip}`;
 
   try {
-    // Increment counter
     const count = await redis.incr(key);
 
-    // Set expiry only on first request in window
     if (count === 1) {
       await redis.expire(key, config.windowSeconds);
     }
 
-    // Get TTL so we can report reset time
     const ttl = await redis.ttl(key);
     const remaining = Math.max(0, config.limit - count);
     const allowed = count <= config.limit;
 
-    // If this is the threshold hit — flag it as suspicious
     if (count === config.limit + 1) {
       await flagSuspiciousActivity(request, ip, config.prefix, count);
     }
@@ -56,11 +47,10 @@ export async function checkRateLimit(
       remaining,
       resetIn: ttl > 0 ? ttl : config.windowSeconds,
     };
-  } catch (err) {
-    // Redis failure — fail open (allow request) to avoid blocking legit users
-    // Log the failure but don't crash
-    console.error("[rateLimit] Redis error — failing open:", err);
-    return { allowed: true, remaining: 1, resetIn: 0 };
+  } catch {
+    // Redis failure — fail CLOSED to protect the election
+    // Better to block a request than allow unlimited attempts
+    return { allowed: false, remaining: 0, resetIn: 60 };
   }
 }
 
@@ -77,7 +67,7 @@ async function flagSuspiciousActivity(
       actor_id: "rate_limiter",
       action: "RATE_LIMIT_EXCEEDED",
       target_type: "ip",
-      target_id: ip.substring(0, 8) + "****", // partial IP for logs
+      target_id: ip.substring(0, 8) + "****",
       metadata: {
         prefix: action,
         attempt_count: attemptCount,
@@ -88,37 +78,20 @@ async function flagSuspiciousActivity(
       ip_hash: ip,
     });
   } catch {
-    // Non-blocking — don't let logging failure affect the response
+    // Non-blocking
   }
 }
 
-// Pre-configured limiters for each endpoint
 export const RATE_LIMITS = {
-  adminLogin: {
-    prefix: "admin_login",
-    limit: 5,
-    windowSeconds: 900, // 15 min
-  },
+  adminLogin: { prefix: "admin_login", limit: 5, windowSeconds: 900 },
   adminGoogleCallback: {
     prefix: "admin_google",
     limit: 10,
-    windowSeconds: 300, // 5 min
+    windowSeconds: 300,
   },
-  sessionVerify: {
-    prefix: "session_verify",
-    limit: 3,
-    windowSeconds: 900, // 15 min — strict, one attempt per student
-  },
-  eligibilityCheck: {
-    prefix: "eligibility",
-    limit: 3,
-    windowSeconds: 900, // 15 min
-  },
-  voteSubmit: {
-    prefix: "vote_submit",
-    limit: 5,
-    windowSeconds: 300, // 5 min
-  },
+  sessionVerify: { prefix: "session_verify", limit: 3, windowSeconds: 900 },
+  eligibilityCheck: { prefix: "eligibility", limit: 3, windowSeconds: 900 },
+  voteSubmit: { prefix: "vote_submit", limit: 5, windowSeconds: 300 },
 } as const;
 
 export function rateLimitResponse(result: RateLimitResult) {

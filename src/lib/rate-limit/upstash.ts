@@ -51,3 +51,4 @@ export async function checkRateLimit(
     // Redis failure — fail CLOSED to protect the election
     return { success: false, remaining: 0 };
   }
+}

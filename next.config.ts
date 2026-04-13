@@ -11,10 +11,21 @@ if (supabaseUrl) {
   }
 }
 
+// Check if we're in development mode
+const isDev = process.env.NODE_ENV === "development";
+
+// Log to confirm config is loaded (check terminal when running npm run dev)
+console.log("=== CSP CONFIG LOADED ===");
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("isDev:", isDev);
+
 const csp = [
   "default-src 'self'",
   // Next.js requires 'unsafe-inline' for hydration scripts
-  "script-src 'self' 'unsafe-inline'",
+  // Add 'unsafe-eval' for development (Turbopack requires it)
+  isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com"
+    : "script-src 'self' 'unsafe-inline' https://accounts.google.com",
   // Tailwind and component libraries use inline styles
   "style-src 'self' 'unsafe-inline'",
   // Supabase Storage for candidate photos; data:/blob: for canvas/previews
@@ -29,9 +40,10 @@ const csp = [
     "https://oauth2.googleapis.com",
     "https://www.googleapis.com",
   ].join(" "),
-  // No plugins, no framing, no external form targets
+  // Google OAuth needs framing for popup/redirect
+  "frame-src 'self' https://accounts.google.com",
+  // No plugins
   "object-src 'none'",
-  "frame-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
   "base-uri 'self'",

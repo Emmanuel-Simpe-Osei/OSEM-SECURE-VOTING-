@@ -16,6 +16,10 @@ export async function GET(
 ) {
   const { slug } = await params;
 
+  // Rate limit GET as well — returns voter details
+  const rl = await checkRateLimit(request, RATE_LIMITS.sessionVerify);
+  if (!rl.allowed) return rateLimitResponse(rl);
+
   const googleSession = await getServerSession(authOptions);
   if (!googleSession?.user?.email) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
@@ -27,6 +31,11 @@ export async function GET(
   }
 
   const email = googleSession.user.email.toLowerCase();
+
+  // Re-validate domain on every request
+  if (!email.endsWith("@upsamail.edu.gh")) {
+    return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  }
 
   const { data: election } = await supabaseServer
     .from("elections")
@@ -92,7 +101,6 @@ export async function POST(
 ) {
   const { slug } = await params;
 
-  // Rate limit — 3 attempts per IP per 15 min
   const rl = await checkRateLimit(request, RATE_LIMITS.sessionVerify);
   if (!rl.allowed) return rateLimitResponse(rl);
 
@@ -105,6 +113,13 @@ export async function POST(
 
   const studentSession = await getStudentSession();
   if (!studentSession?.student_id) {
+    return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  const email = googleSession.user.email.toLowerCase();
+
+  // Re-validate domain
+  if (!email.endsWith("@upsamail.edu.gh")) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
@@ -121,8 +136,6 @@ export async function POST(
   if (!allowedSessions.includes(selected_session)) {
     return NextResponse.json({ error: "Invalid session." }, { status: 400 });
   }
-
-  const email = googleSession.user.email.toLowerCase();
 
   const { data: election } = await supabaseServer
     .from("elections")
@@ -156,11 +169,11 @@ export async function POST(
   if (!voter) {
     await supabaseServer.from("audit_logs").insert({
       actor_type: "unknown",
-      actor_id: email,
+      actor_id: "redacted",
       action: "SESSION_VERIFY_VOTER_NOT_FOUND",
       target_type: "election",
       target_id: election.id,
-      metadata: { email, selected_session, slug },
+      metadata: { selected_session, slug },
       ip_hash: ipHash,
     });
     await studentSession.destroy();
@@ -189,7 +202,6 @@ export async function POST(
       student_id: voter.student_id,
       selected_session,
       actual_session: voter.programme_session,
-      email,
       verified,
     },
     ip_hash: ipHash,

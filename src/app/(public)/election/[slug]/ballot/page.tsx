@@ -21,6 +21,7 @@ interface Candidate {
   bio: string | null;
   photo_url: string | null;
   sort_order: number;
+  is_no_vote?: boolean;
 }
 
 interface Position {
@@ -64,6 +65,7 @@ function useNetwork() {
 async function preloadImages(positions: Position[]): Promise<void> {
   const urls = positions
     .flatMap((p) => p.candidates)
+    .filter((c) => !c.is_no_vote)
     .map((c) => c.photo_url)
     .filter(Boolean) as string[];
   if (urls.length === 0) return;
@@ -189,6 +191,7 @@ export default function BallotPage() {
     loadBallot();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryCount]);
+
   async function loadBallot() {
     setLoading(true);
     setImagesReady(false);
@@ -299,7 +302,7 @@ export default function BallotPage() {
         const selectedIds = selections[position.id] || [];
         const selectedCandidates = position.candidates
           .filter((c) => selectedIds.includes(c.id))
-          .map((c) => c.full_name);
+          .map((c) => (c.is_no_vote ? "NO" : c.full_name));
         return {
           position: position.name,
           candidate: selectedCandidates.join(", "),
@@ -791,143 +794,323 @@ export default function BallotPage() {
                 <h1 className="text-3xl font-bold text-white mb-1 tracking-tight">
                   {currentPosition.name}
                 </h1>
-                <p
-                  className="text-sm"
-                  style={{ color: "rgba(255,255,255,0.4)" }}
-                >
-                  {currentPosition.max_votes === 1
-                    ? "Select one candidate"
-                    : `Select up to ${currentPosition.max_votes} candidates`}
-                </p>
+                {(() => {
+                  const realCandidates = currentPosition.candidates.filter(
+                    (c) => !c.is_no_vote,
+                  );
+                  const isUncontested = realCandidates.length === 1;
+                  return (
+                    <p
+                      className="text-sm"
+                      style={{ color: "rgba(255,255,255,0.4)" }}
+                    >
+                      {isUncontested
+                        ? "Vote yes or no for this candidate"
+                        : currentPosition.max_votes === 1
+                          ? "Select one candidate"
+                          : `Select up to ${currentPosition.max_votes} candidates`}
+                    </p>
+                  );
+                })()}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                {currentPosition.candidates
-                  .sort((a, b) => a.sort_order - b.sort_order)
-                  .map((candidate) => {
-                    const isSelected = (
-                      selections[currentPosition.id] || []
-                    ).includes(candidate.id);
-                    return (
-                      <button
-                        key={candidate.id}
-                        onClick={() =>
-                          selectCandidate(
-                            currentPosition.id,
-                            candidate.id,
-                            currentPosition.max_votes,
-                          )
-                        }
-                        className="text-left transition-all duration-200 active:scale-95"
+              {(() => {
+                const realCandidates = currentPosition.candidates.filter(
+                  (c) => !c.is_no_vote,
+                );
+                const isUncontested = realCandidates.length === 1;
+                const noVoteCandidate = currentPosition.candidates.find(
+                  (c) => c.is_no_vote,
+                );
+                const realCandidate = realCandidates[0];
+
+                if (isUncontested && realCandidate && noVoteCandidate) {
+                  const isYesSelected = (
+                    selections[currentPosition.id] || []
+                  ).includes(realCandidate.id);
+                  const isNoSelected = (
+                    selections[currentPosition.id] || []
+                  ).includes(noVoteCandidate.id);
+
+                  return (
+                    <div className="mb-8">
+                      {/* Candidate card */}
+                      <div
+                        className="rounded-2xl overflow-hidden mb-6"
+                        style={{
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
                       >
-                        <div
-                          className="rounded-2xl overflow-hidden transition-all duration-300"
+                        {realCandidate.photo_url && (
+                          <div
+                            className="w-full overflow-hidden"
+                            style={{ maxHeight: "320px" }}
+                          >
+                            <img
+                              src={realCandidate.photo_url}
+                              alt={realCandidate.full_name}
+                              className="w-full object-cover object-top"
+                            />
+                          </div>
+                        )}
+                        <div className="p-5 text-center">
+                          <p className="text-xl font-bold text-white mb-1">
+                            {realCandidate.full_name}
+                          </p>
+                          {realCandidate.bio && (
+                            <p
+                              className="text-sm"
+                              style={{ color: "rgba(255,255,255,0.4)" }}
+                            >
+                              {realCandidate.bio}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Question */}
+                      <p
+                        className="text-center text-sm font-semibold mb-5"
+                        style={{ color: "rgba(255,255,255,0.6)" }}
+                      >
+                        Do you support{" "}
+                        <span className="text-white font-bold">
+                          {realCandidate.full_name}
+                        </span>{" "}
+                        as your{" "}
+                        <span className="text-white font-bold">
+                          {currentPosition.name}
+                        </span>
+                        ?
+                      </p>
+
+                      {/* Yes / No buttons */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <button
+                          onClick={() =>
+                            selectCandidate(
+                              currentPosition.id,
+                              realCandidate.id,
+                              1,
+                            )
+                          }
+                          className="py-5 rounded-2xl flex flex-col items-center gap-2 transition-all duration-200 active:scale-95"
                           style={{
-                            background: isSelected
-                              ? "rgba(249,168,37,0.12)"
+                            background: isYesSelected
+                              ? "rgba(22,163,74,0.2)"
                               : "rgba(255,255,255,0.05)",
-                            border: isSelected
-                              ? "2px solid #F9A825"
-                              : "1px solid rgba(255,255,255,0.08)",
-                            boxShadow: isSelected
-                              ? "0 8px 32px rgba(249,168,37,0.2)"
+                            border: isYesSelected
+                              ? "2px solid #4ADE80"
+                              : "1px solid rgba(255,255,255,0.1)",
+                            boxShadow: isYesSelected
+                              ? "0 8px 32px rgba(74,222,128,0.2)"
                               : "none",
                           }}
                         >
-                          <div
-                            className="w-full relative overflow-hidden"
-                            style={{ aspectRatio: "1/1" }}
+                          <span style={{ fontSize: "32px" }}>✅</span>
+                          <span
+                            className="text-base font-bold"
+                            style={{
+                              color: isYesSelected
+                                ? "#4ADE80"
+                                : "rgba(255,255,255,0.7)",
+                            }}
                           >
-                            {candidate.photo_url ? (
-                              <img
-                                src={candidate.photo_url}
-                                alt={candidate.full_name}
-                                className="w-full h-full object-cover transition-transform duration-300"
-                                style={{
-                                  transform: isSelected
-                                    ? "scale(1.03)"
-                                    : "scale(1)",
-                                }}
-                              />
-                            ) : (
+                            YES
+                          </span>
+                          <span
+                            className="text-xs"
+                            style={{
+                              color: isYesSelected
+                                ? "rgba(74,222,128,0.7)"
+                                : "rgba(255,255,255,0.3)",
+                            }}
+                          >
+                            I Support
+                          </span>
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            selectCandidate(
+                              currentPosition.id,
+                              noVoteCandidate.id,
+                              1,
+                            )
+                          }
+                          className="py-5 rounded-2xl flex flex-col items-center gap-2 transition-all duration-200 active:scale-95"
+                          style={{
+                            background: isNoSelected
+                              ? "rgba(220,38,38,0.2)"
+                              : "rgba(255,255,255,0.05)",
+                            border: isNoSelected
+                              ? "2px solid #F87171"
+                              : "1px solid rgba(255,255,255,0.1)",
+                            boxShadow: isNoSelected
+                              ? "0 8px 32px rgba(248,113,113,0.2)"
+                              : "none",
+                          }}
+                        >
+                          <span style={{ fontSize: "32px" }}>❌</span>
+                          <span
+                            className="text-base font-bold"
+                            style={{
+                              color: isNoSelected
+                                ? "#F87171"
+                                : "rgba(255,255,255,0.7)",
+                            }}
+                          >
+                            NO
+                          </span>
+                          <span
+                            className="text-xs"
+                            style={{
+                              color: isNoSelected
+                                ? "rgba(248,113,113,0.7)"
+                                : "rgba(255,255,255,0.3)",
+                            }}
+                          >
+                            I Don&apos;t Support
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Normal contested election
+                return (
+                  <div className="grid grid-cols-2 gap-4 mb-8">
+                    {currentPosition.candidates
+                      .filter((c) => !c.is_no_vote)
+                      .sort((a, b) => a.sort_order - b.sort_order)
+                      .map((candidate) => {
+                        const isSelected = (
+                          selections[currentPosition.id] || []
+                        ).includes(candidate.id);
+                        return (
+                          <button
+                            key={candidate.id}
+                            onClick={() =>
+                              selectCandidate(
+                                currentPosition.id,
+                                candidate.id,
+                                currentPosition.max_votes,
+                              )
+                            }
+                            className="text-left transition-all duration-200 active:scale-95"
+                          >
+                            <div
+                              className="rounded-2xl overflow-hidden transition-all duration-300"
+                              style={{
+                                background: isSelected
+                                  ? "rgba(249,168,37,0.12)"
+                                  : "rgba(255,255,255,0.05)",
+                                border: isSelected
+                                  ? "2px solid #F9A825"
+                                  : "1px solid rgba(255,255,255,0.08)",
+                                boxShadow: isSelected
+                                  ? "0 8px 32px rgba(249,168,37,0.2)"
+                                  : "none",
+                              }}
+                            >
                               <div
-                                className="w-full h-full flex items-center justify-center"
-                                style={{
-                                  background: isSelected
-                                    ? "linear-gradient(135deg, rgba(249,168,37,0.2), rgba(249,168,37,0.05))"
-                                    : "rgba(255,255,255,0.03)",
-                                }}
+                                className="w-full relative overflow-hidden"
+                                style={{ aspectRatio: "1/1" }}
                               >
-                                <User
-                                  className="w-14 h-14"
+                                {candidate.photo_url ? (
+                                  <img
+                                    src={candidate.photo_url}
+                                    alt={candidate.full_name}
+                                    className="w-full h-full object-cover transition-transform duration-300"
+                                    style={{
+                                      transform: isSelected
+                                        ? "scale(1.03)"
+                                        : "scale(1)",
+                                    }}
+                                  />
+                                ) : (
+                                  <div
+                                    className="w-full h-full flex items-center justify-center"
+                                    style={{
+                                      background: isSelected
+                                        ? "linear-gradient(135deg, rgba(249,168,37,0.2), rgba(249,168,37,0.05))"
+                                        : "rgba(255,255,255,0.03)",
+                                    }}
+                                  >
+                                    <User
+                                      className="w-14 h-14"
+                                      style={{
+                                        color: isSelected
+                                          ? "#F9A825"
+                                          : "rgba(255,255,255,0.15)",
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                                {isSelected && (
+                                  <div
+                                    className="absolute inset-0 flex items-end justify-end p-3"
+                                    style={{
+                                      background:
+                                        "linear-gradient(to top, rgba(249,168,37,0.4), transparent)",
+                                    }}
+                                  >
+                                    <div
+                                      className="w-8 h-8 rounded-full flex items-center justify-center"
+                                      style={{
+                                        background: "#F9A825",
+                                        boxShadow:
+                                          "0 4px 12px rgba(249,168,37,0.5)",
+                                      }}
+                                    >
+                                      <svg
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="#0B1E35"
+                                        strokeWidth={3}
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          d="M5 13l4 4L19 7"
+                                        />
+                                      </svg>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-4">
+                                <p
+                                  className="font-bold text-sm leading-tight"
                                   style={{
                                     color: isSelected
                                       ? "#F9A825"
-                                      : "rgba(255,255,255,0.15)",
-                                  }}
-                                />
-                              </div>
-                            )}
-                            {isSelected && (
-                              <div
-                                className="absolute inset-0 flex items-end justify-end p-3"
-                                style={{
-                                  background:
-                                    "linear-gradient(to top, rgba(249,168,37,0.4), transparent)",
-                                }}
-                              >
-                                <div
-                                  className="w-8 h-8 rounded-full flex items-center justify-center"
-                                  style={{
-                                    background: "#F9A825",
-                                    boxShadow:
-                                      "0 4px 12px rgba(249,168,37,0.5)",
+                                      : "rgba(255,255,255,0.9)",
                                   }}
                                 >
-                                  <svg
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="#0B1E35"
-                                    strokeWidth={3}
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      d="M5 13l4 4L19 7"
-                                    />
-                                  </svg>
-                                </div>
+                                  {candidate.full_name}
+                                </p>
+                                <p
+                                  className="text-xs mt-1.5 font-medium"
+                                  style={{
+                                    color: isSelected
+                                      ? "rgba(249,168,37,0.7)"
+                                      : "rgba(255,255,255,0.25)",
+                                  }}
+                                >
+                                  {isSelected ? "✓ Selected" : "Tap to select"}
+                                </p>
                               </div>
-                            )}
-                          </div>
-                          <div className="p-4">
-                            <p
-                              className="font-bold text-sm leading-tight"
-                              style={{
-                                color: isSelected
-                                  ? "#F9A825"
-                                  : "rgba(255,255,255,0.9)",
-                              }}
-                            >
-                              {candidate.full_name}
-                            </p>
-                            <p
-                              className="text-xs mt-1.5 font-medium"
-                              style={{
-                                color: isSelected
-                                  ? "rgba(249,168,37,0.7)"
-                                  : "rgba(255,255,255,0.25)",
-                              }}
-                            >
-                              {isSelected ? "✓ Selected" : "Tap to select"}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </div>
+                );
+              })()}
 
               <div className="flex gap-3">
                 {currentStep > 0 && (
@@ -1034,11 +1217,17 @@ export default function BallotPage() {
                           <div
                             className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 overflow-hidden"
                             style={{
-                              background: "rgba(249,168,37,0.1)",
-                              border: "1px solid rgba(249,168,37,0.2)",
+                              background: candidate.is_no_vote
+                                ? "rgba(220,38,38,0.1)"
+                                : "rgba(249,168,37,0.1)",
+                              border: candidate.is_no_vote
+                                ? "1px solid rgba(220,38,38,0.2)"
+                                : "1px solid rgba(249,168,37,0.2)",
                             }}
                           >
-                            {candidate.photo_url ? (
+                            {candidate.is_no_vote ? (
+                              <span style={{ fontSize: "20px" }}>❌</span>
+                            ) : candidate.photo_url ? (
                               <img
                                 src={candidate.photo_url}
                                 alt={candidate.full_name}
@@ -1052,11 +1241,17 @@ export default function BallotPage() {
                             )}
                           </div>
                           <p className="font-bold text-sm text-white flex-1">
-                            {candidate.full_name}
+                            {candidate.is_no_vote
+                              ? "NO — I Don't Support"
+                              : candidate.full_name}
                           </p>
                           <CheckCircle2
                             className="w-5 h-5 shrink-0"
-                            style={{ color: "#4ADE80" }}
+                            style={{
+                              color: candidate.is_no_vote
+                                ? "#F87171"
+                                : "#4ADE80",
+                            }}
                           />
                         </div>
                       ))}

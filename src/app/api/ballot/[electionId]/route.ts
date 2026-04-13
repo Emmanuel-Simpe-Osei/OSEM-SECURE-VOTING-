@@ -9,18 +9,15 @@ export async function GET(
 ) {
   const { electionId } = await params;
 
-  // Step 1: Verify student session
   const session = await getStudentSession();
   if (!session?.student_id) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  // Step 2: Verify session matches election
   if (session.election_id !== electionId) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  // Step 3: Get election details
   const { data: election } = await supabaseServer
     .from("elections")
     .select("id, title, slug, status, start_time, end_time")
@@ -34,7 +31,6 @@ export async function GET(
     );
   }
 
-  // Step 4: Check time window
   const now = new Date();
   if (
     now < new Date(election.start_time) ||
@@ -46,7 +42,6 @@ export async function GET(
     );
   }
 
-  // Step 5: Check voter hasn't already voted
   const { data: voter } = await supabaseServer
     .from("voter_eligibility")
     .select("has_voted, full_name")
@@ -62,7 +57,7 @@ export async function GET(
     return NextResponse.json({ error: "Already voted" }, { status: 400 });
   }
 
-  // Step 6: Get positions and candidates
+  // Get positions and candidates including is_no_vote flag
   const { data: positions } = await supabaseServer
     .from("positions")
     .select(
@@ -77,16 +72,52 @@ export async function GET(
         full_name,
         bio,
         photo_url,
-        sort_order
+        sort_order,
+        is_no_vote
       )
     `,
     )
     .eq("election_id", electionId)
     .order("sort_order");
 
-  // Step 7: Generate one-time submission token
+  // For uncontested positions (exactly 1 real candidate),
+  // auto-create the NO vote candidate if it doesn't exist
+  if (positions) {
+    for (const position of positions) {
+      const realCandidates = position.candidates.filter(
+        (c: { is_no_vote: boolean }) => !c.is_no_vote,
+      );
+
+      if (realCandidates.length === 1) {
+        // Check if NO vote candidate already exists
+        const hasNoVote = position.candidates.some(
+          (c: { is_no_vote: boolean }) => c.is_no_vote,
+        );
+
+        if (!hasNoVote) {
+          // Call the DB function to create NO vote candidate
+          await supabaseServer.rpc("ensure_no_vote_candidate", {
+            p_election_id: electionId,
+            p_position_id: position.id,
+          });
+
+          // Fetch the updated candidates for this position
+          const { data: updatedCandidates } = await supabaseServer
+            .from("candidates")
+            .select("id, full_name, bio, photo_url, sort_order, is_no_vote")
+            .eq("position_id", position.id)
+            .eq("election_id", electionId);
+
+          if (updatedCandidates) {
+            position.candidates = updatedCandidates;
+          }
+        }
+      }
+    }
+  }
+
   const token = generateToken(32);
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
   await supabaseServer.from("ballot_submission_tokens").insert({
     election_id: electionId,

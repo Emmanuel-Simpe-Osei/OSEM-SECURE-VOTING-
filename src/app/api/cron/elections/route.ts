@@ -4,8 +4,8 @@ import { supabaseServer } from "@/lib/db/server";
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
 
-  // CRITICAL: Reject if CRON_SECRET is not configured
-  if (!cronSecret) {
+  // Reject if CRON_SECRET is not configured or empty
+  if (!cronSecret || cronSecret.trim().length < 16) {
     return NextResponse.json({ error: "Cron not configured" }, { status: 500 });
   }
 

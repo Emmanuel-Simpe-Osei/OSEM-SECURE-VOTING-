@@ -1,8 +1,6 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
-// Allow rate limiting to be disabled when Redis is not configured
-// This is acceptable for initial deployment — add Upstash before scaling
 const isRedisConfigured =
   process.env.UPSTASH_REDIS_REST_URL &&
   process.env.UPSTASH_REDIS_REST_URL.trim() !== "" &&
@@ -37,15 +35,20 @@ export async function checkRateLimit(
   limiter: Ratelimit | null,
   identifier: string,
 ): Promise<{ success: boolean; remaining?: number }> {
-  // If Redis not configured — allow all requests
-  // Add Upstash Redis before running a real election at scale
+  // If Redis not configured — fail CLOSED on critical endpoints
+  // This prevents OTP brute-force when Redis is unavailable
   if (!limiter) {
-    return { success: true, remaining: 999 };
+    return { success: false, remaining: 0 };
   }
 
-  const result = await limiter.limit(identifier);
-  return {
-    success: result.success,
-    remaining: result.remaining,
-  };
+  try {
+    const result = await limiter.limit(identifier);
+    return {
+      success: result.success,
+      remaining: result.remaining,
+    };
+  } catch {
+    // Redis failure — fail CLOSED to protect the election
+    return { success: false, remaining: 0 };
+  }
 }

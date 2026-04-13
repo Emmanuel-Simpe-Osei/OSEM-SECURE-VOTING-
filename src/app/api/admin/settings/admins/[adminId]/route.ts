@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
+import { z } from "zod";
+
+const uuidSchema = z.string().uuid();
 
 export async function DELETE(
   request: NextRequest,
@@ -13,7 +16,11 @@ export async function DELETE(
 
   const { adminId } = await params;
 
-  // ✅ Query by user_id
+  // Validate UUID format
+  if (!uuidSchema.safeParse(adminId).success) {
+    return NextResponse.json({ error: "Invalid admin ID." }, { status: 400 });
+  }
+
   const { data: currentAdmin } = await supabaseServer
     .from("admin_users")
     .select("id, role")
@@ -30,6 +37,17 @@ export async function DELETE(
       { error: "You cannot remove yourself." },
       { status: 400 },
     );
+  }
+
+  // Verify target admin exists before deleting
+  const { data: targetAdmin } = await supabaseServer
+    .from("admin_users")
+    .select("id, role")
+    .eq("id", adminId)
+    .single();
+
+  if (!targetAdmin) {
+    return NextResponse.json({ error: "Admin not found." }, { status: 404 });
   }
 
   const { error } = await supabaseServer
@@ -50,7 +68,7 @@ export async function DELETE(
     action: "ADMIN_REMOVED",
     target_type: "admin_users",
     target_id: adminId,
-    metadata: {},
+    metadata: { removed_role: targetAdmin.role },
     ip_hash: "admin-action",
   });
 

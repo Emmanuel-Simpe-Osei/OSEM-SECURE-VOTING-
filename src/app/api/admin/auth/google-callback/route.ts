@@ -11,11 +11,8 @@ import {
 import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
-  // Rate limit — 10 attempts per IP per 5 min
   const rl = await checkRateLimit(request, RATE_LIMITS.adminGoogleCallback);
   if (!rl.allowed) {
-    // Can't return JSON here — this is a redirect endpoint
-    // Redirect to login with error instead
     return NextResponse.redirect(
       new URL("/admin/login?error=too_many_requests", request.url),
     );
@@ -29,13 +26,18 @@ export async function GET(request: NextRequest) {
 
   const cookieStore = await cookies();
   const storedState = cookieStore.get("oauth_state")?.value;
-  cookieStore.delete("oauth_state");
 
+  // CRITICAL FIX: Validate state BEFORE deleting cookie
+  // Deleting before validation creates a race condition window
   if (!storedState || storedState !== returnedState) {
+    cookieStore.delete("oauth_state");
     return NextResponse.redirect(
       new URL("/admin/login?error=invalid_state", request.url),
     );
   }
+
+  // Only delete after successful validation
+  cookieStore.delete("oauth_state");
 
   if (error || !code) {
     return NextResponse.redirect(
@@ -81,7 +83,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Find user in Supabase Auth
     const { data: authUsers } = await supabaseServer.auth.admin.listUsers();
     const authUser = authUsers?.users?.find(
       (u) => u.email?.toLowerCase() === email,
@@ -93,8 +94,8 @@ export async function GET(request: NextRequest) {
         actor_id: "unknown",
         action: "ADMIN_LOGIN_GOOGLE_NOT_FOUND",
         target_type: "admin",
-        target_id: email,
-        metadata: { email },
+        target_id: "redacted",
+        metadata: { reason: "user_not_found" },
         ip_hash: ipHash,
       });
       return NextResponse.redirect(
@@ -114,8 +115,8 @@ export async function GET(request: NextRequest) {
         actor_id: authUser.id,
         action: "ADMIN_LOGIN_GOOGLE_UNAUTHORIZED",
         target_type: "admin",
-        target_id: email,
-        metadata: { email, is_active: adminUser?.is_active },
+        target_id: authUser.id,
+        metadata: { reason: "account_inactive_or_not_found" },
         ip_hash: ipHash,
       });
       return NextResponse.redirect(
@@ -141,13 +142,12 @@ export async function GET(request: NextRequest) {
       action: "ADMIN_LOGIN_GOOGLE",
       target_type: "admin",
       target_id: authUser.id,
-      metadata: { email, role: adminUser.role, method: "google_oauth" },
+      metadata: { role: adminUser.role, method: "google_oauth" },
       ip_hash: ipHash,
     });
 
     return NextResponse.redirect(new URL("/admin/dashboard", request.url));
-  } catch (err) {
-    
+  } catch {
     return NextResponse.redirect(
       new URL("/admin/login?error=google_failed", request.url),
     );

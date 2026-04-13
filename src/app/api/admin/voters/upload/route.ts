@@ -4,21 +4,22 @@ import { supabaseServer } from "@/lib/db/server";
 import { z } from "zod";
 
 const uploadSchema = z.object({
-  election_id: z.string(),
+  election_id: z.string().uuid(),
   voters: z
     .array(
       z.object({
-        student_id: z.string().min(1),
-        school_email: z.string().email(),
-        full_name: z.string().min(1),
-        department: z.string().nullable().optional(),
-        level: z.string().nullable().optional(),
-        programme_session: z.string().nullable().optional(),
-        programme: z.string().nullable().optional(),
-        gender: z.string().nullable().optional(),
+        student_id: z.string().min(1).max(50),
+        school_email: z.string().email().max(255),
+        full_name: z.string().min(1).max(255),
+        department: z.string().max(255).nullable().optional(),
+        level: z.string().max(50).nullable().optional(),
+        programme_session: z.string().max(100).nullable().optional(),
+        programme: z.string().max(255).nullable().optional(),
+        gender: z.string().max(20).nullable().optional(),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(15000), // max 15,000 voters per upload
 });
 
 export async function POST(request: NextRequest) {
@@ -30,12 +31,14 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const parsed = uploadSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid data." }, { status: 400 });
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message || "Invalid data." },
+      { status: 400 },
+    );
   }
 
   const { election_id, voters } = parsed.data;
 
-  // Verify election exists
   const { data: election } = await supabaseServer
     .from("elections")
     .select("id, status")
@@ -53,7 +56,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Build rows with all new fields
   const rows = voters.map((v) => ({
     election_id,
     student_id: v.student_id.toString().trim(),
@@ -68,7 +70,6 @@ export async function POST(request: NextRequest) {
     has_voted: false,
   }));
 
-  // Insert in batches of 500
   let inserted = 0;
   let skipped = 0;
 
@@ -83,7 +84,6 @@ export async function POST(request: NextRequest) {
       .select("id");
 
     if (error) {
-      
       return NextResponse.json(
         { error: "Failed to upload voters." },
         { status: 500 },
@@ -94,7 +94,6 @@ export async function POST(request: NextRequest) {
     skipped += batch.length - (data?.length || 0);
   }
 
-  // Audit log
   await supabaseServer.from("audit_logs").insert({
     actor_type: "admin",
     actor_id: session.admin_id,

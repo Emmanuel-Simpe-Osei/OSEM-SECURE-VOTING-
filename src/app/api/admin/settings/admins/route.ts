@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
+import { z } from "zod";
+
+const addAdminSchema = z.object({
+  email: z.string().email().min(5).max(255),
+  role: z.enum(["admin", "super_admin"]),
+});
 
 export async function GET() {
   const session = await getAdminSession();
@@ -74,22 +80,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { email, role } = await request.json();
-
-  if (!email || !email.includes("@")) {
-    return NextResponse.json({ error: "Invalid email." }, { status: 400 });
+  const body = await request.json();
+  const parsed = addAdminSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message || "Invalid input." },
+      { status: 400 },
+    );
   }
 
-  if (!["admin", "super_admin"].includes(role)) {
-    return NextResponse.json({ error: "Invalid role." }, { status: 400 });
-  }
+  const { email, role } = parsed.data;
+  const normalizedEmail = email.toLowerCase().trim();
 
   let userId: string;
 
-  // First check if user already exists in Supabase Auth
   const { data: existingUsers } = await supabaseServer.auth.admin.listUsers();
   const existingAuthUser = existingUsers?.users?.find(
-    (u) => u.email?.toLowerCase() === email.toLowerCase(),
+    (u) => u.email?.toLowerCase() === normalizedEmail,
   );
 
   if (existingAuthUser) {
@@ -97,7 +104,7 @@ export async function POST(request: NextRequest) {
   } else {
     const { data: newUser, error: createError } =
       await supabaseServer.auth.admin.createUser({
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         email_confirm: true,
       });
 
@@ -110,7 +117,6 @@ export async function POST(request: NextRequest) {
     userId = newUser.user.id;
   }
 
-  // Check if already an admin
   const { data: existingAdmin } = await supabaseServer
     .from("admin_users")
     .select("id")
@@ -124,17 +130,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Insert with full_name derived from email prefix
   const { error } = await supabaseServer.from("admin_users").insert({
     user_id: userId,
     role,
     is_active: true,
-    email: email.toLowerCase(),
-    full_name: email.split("@")[0],
+    email: normalizedEmail,
+    full_name: normalizedEmail.split("@")[0],
   });
 
   if (error) {
-    
     return NextResponse.json(
       { error: "Failed to add admin." },
       { status: 500 },
@@ -147,7 +151,7 @@ export async function POST(request: NextRequest) {
     action: "ADMIN_ADDED",
     target_type: "admin_users",
     target_id: userId,
-    metadata: { email, role },
+    metadata: { role },
     ip_hash: "admin-action",
   });
 

@@ -17,7 +17,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  // Only super_admin can override votes
   if (session.role !== "super_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -51,6 +50,28 @@ export async function POST(request: NextRequest) {
   const bypass_code = crypto.randomBytes(4).toString("hex").toUpperCase();
   const now = new Date().toISOString();
 
+  // Create a ballot_submission record so vote totals stay accurate
+  const { data: submission, error: submissionError } = await supabaseServer
+    .from("ballot_submissions")
+    .insert({
+      election_id,
+      student_id,
+      submission_token: `override-${bypass_code}`,
+      confirmation_code: bypass_code,
+      submitted_at: now,
+      client_ip_hash: "admin-override",
+    })
+    .select("id")
+    .single();
+
+  if (submissionError || !submission) {
+    return NextResponse.json(
+      { error: "Failed to create ballot record." },
+      { status: 500 },
+    );
+  }
+
+  // Mark as voted
   const { error } = await supabaseServer
     .from("voter_eligibility")
     .update({ has_voted: true, voted_at: now })
@@ -75,6 +96,7 @@ export async function POST(request: NextRequest) {
       election_id,
       reason: reason.trim(),
       bypass_code,
+      submission_id: submission.id,
       overridden_at: now,
       admin_id: session.admin_id,
     },

@@ -10,8 +10,7 @@ export async function POST(request: NextRequest) {
   }
 
   const response = NextResponse.json({ success: true });
-  
-  // Explicitly clear the cookie
+
   response.cookies.set("osem_admin_session", "", {
     httpOnly: true,
     secure: true,

@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Pencil,
 } from "lucide-react";
+import { compressImage } from "@/lib/utils/compressImage";
 
 interface Candidate {
   id: string;
@@ -94,7 +95,6 @@ export default function CandidatesPage() {
     onConfirm: () => {},
   });
 
-  // Position form
   const [showPositionForm, setShowPositionForm] = useState(false);
   const [positionForm, setPositionForm] = useState({
     name: "",
@@ -103,7 +103,6 @@ export default function CandidatesPage() {
   });
   const [savingPosition, setSavingPosition] = useState(false);
 
-  // Add candidate form
   const [candidateForm, setCandidateForm] = useState<{
     positionId: string | null;
     full_name: string;
@@ -121,7 +120,6 @@ export default function CandidatesPage() {
   });
   const [savingCandidate, setSavingCandidate] = useState(false);
 
-  // Edit candidate form
   const [editForm, setEditForm] = useState<EditForm>({
     candidateId: null,
     positionId: null,
@@ -181,7 +179,6 @@ export default function CandidatesPage() {
     electionStatus,
   );
 
-  // ── Reorder positions ─────────────────────────────────────────────
   async function movePosition(positionId: string, direction: "up" | "down") {
     const idx = positions.findIndex((p) => p.id === positionId);
     if (direction === "up" && idx === 0) return;
@@ -219,7 +216,6 @@ export default function CandidatesPage() {
     }
   }
 
-  // ── Add position ──────────────────────────────────────────────────
   async function addPosition() {
     if (!positionForm.name.trim()) return;
     setSavingPosition(true);
@@ -251,7 +247,6 @@ export default function CandidatesPage() {
     }
   }
 
-  // ── Add candidate helpers ─────────────────────────────────────────
   function openCandidateForm(positionId: string) {
     if (candidateForm.photo_preview)
       URL.revokeObjectURL(candidateForm.photo_preview);
@@ -290,10 +285,6 @@ export default function CandidatesPage() {
       showToast("error", "Only JPG, PNG and WebP images are allowed.");
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
-      showToast("error", "Photo must be under 2MB.");
-      return;
-    }
     const preview = URL.createObjectURL(file);
     if (mode === "add") {
       if (candidateForm.photo_preview)
@@ -314,11 +305,16 @@ export default function CandidatesPage() {
   }
 
   async function uploadPhoto(file: File): Promise<string | null> {
+    try {
+      file = await compressImage(file, 2);
+    } catch {
+      // compression failed, use original
+    }
     const uploadRes = await fetch(
       `/api/admin/elections/${id}/candidates/upload-photo`,
       {
         method: "POST",
-        headers: { "Content-Type": file.type },
+        headers: { "Content-Type": "image/jpeg" },
         body: file,
       },
     );
@@ -330,7 +326,6 @@ export default function CandidatesPage() {
     return uploadData.url;
   }
 
-  // ── Add candidate ─────────────────────────────────────────────────
   async function addCandidate(positionId: string) {
     if (!candidateForm.full_name.trim()) return;
     setSavingCandidate(true);
@@ -380,7 +375,6 @@ export default function CandidatesPage() {
     }
   }
 
-  // ── Edit candidate ────────────────────────────────────────────────
   function openEditForm(candidate: Candidate, positionId: string) {
     if (editForm.photo_preview) URL.revokeObjectURL(editForm.photo_preview);
     setEditForm({
@@ -393,7 +387,6 @@ export default function CandidatesPage() {
       existing_photo_url: candidate.photo_url,
       photoKey: editForm.photoKey + 1,
     });
-    // Close add form if open
     closeCandidateForm();
   }
 
@@ -465,7 +458,6 @@ export default function CandidatesPage() {
     }
   }
 
-  // ── Delete candidate ──────────────────────────────────────────────
   function confirmDeleteCandidate(positionId: string, candidate: Candidate) {
     showConfirm(
       "Remove Candidate",
@@ -505,7 +497,6 @@ export default function CandidatesPage() {
     );
   }
 
-  // ── Delete position ───────────────────────────────────────────────
   function confirmDeletePosition(position: Position) {
     showConfirm(
       "Delete Position",
@@ -565,7 +556,6 @@ export default function CandidatesPage() {
       className="min-h-screen flex flex-col"
       style={{ background: "#0B1E35" }}
     >
-      {/* Toast notifications */}
       <div className="fixed top-4 right-4 z-50 space-y-2 pointer-events-none">
         {toasts.map((toast) => (
           <div
@@ -596,7 +586,6 @@ export default function CandidatesPage() {
         ))}
       </div>
 
-      {/* Confirm dialog */}
       {confirm.open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -641,7 +630,6 @@ export default function CandidatesPage() {
         </div>
       )}
 
-      {/* Edit candidate modal */}
       {editForm.candidateId && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -671,7 +659,6 @@ export default function CandidatesPage() {
               </button>
             </div>
 
-            {/* Photo */}
             <div className="flex items-center gap-4">
               <div className="relative shrink-0">
                 {editForm.photo_preview || editForm.existing_photo_url ? (
@@ -746,12 +733,11 @@ export default function CandidatesPage() {
                   className="text-xs mt-0.5"
                   style={{ color: "rgba(255,255,255,0.3)" }}
                 >
-                  JPG, PNG, WebP · Max 2MB
+                  JPG, PNG, WebP · Auto-compressed
                 </p>
               </div>
             </div>
 
-            {/* Name */}
             <input
               type="text"
               value={editForm.full_name}
@@ -768,7 +754,6 @@ export default function CandidatesPage() {
               }}
             />
 
-            {/* Bio */}
             <input
               type="text"
               value={editForm.bio}
@@ -784,7 +769,6 @@ export default function CandidatesPage() {
               }}
             />
 
-            {/* Actions */}
             <div className="flex gap-3">
               <button
                 onClick={closeEditForm}
@@ -826,7 +810,6 @@ export default function CandidatesPage() {
         }
       `}</style>
 
-      {/* Network banner */}
       {mounted && !online && (
         <div
           className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-xs font-semibold"
@@ -837,7 +820,6 @@ export default function CandidatesPage() {
         </div>
       )}
 
-      {/* Header */}
       <div
         className="w-full px-6 py-4 flex items-center justify-between sticky top-0 z-10"
         style={{
@@ -899,7 +881,6 @@ export default function CandidatesPage() {
             </p>
           </div>
 
-          {/* Locked banner */}
           {isLocked ? (
             <div
               className="rounded-2xl px-4 py-3 mb-6 flex items-center gap-2"
@@ -936,7 +917,6 @@ export default function CandidatesPage() {
             </div>
           )}
 
-          {/* Positions */}
           <div className="space-y-5 mb-6">
             {positions.map((position, idx) => (
               <div
@@ -947,12 +927,10 @@ export default function CandidatesPage() {
                   border: "1px solid rgba(255,255,255,0.08)",
                 }}
               >
-                {/* Position header */}
                 <div
                   className="px-5 py-4 flex items-center gap-3"
                   style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
                 >
-                  {/* Reorder */}
                   <div className="flex flex-col gap-0.5 shrink-0">
                     <button
                       type="button"
@@ -982,7 +960,6 @@ export default function CandidatesPage() {
                     </button>
                   </div>
 
-                  {/* Number */}
                   <div
                     className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs font-bold"
                     style={{
@@ -993,7 +970,6 @@ export default function CandidatesPage() {
                     {idx + 1}
                   </div>
 
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-sm text-white">
                       {position.name}
@@ -1012,7 +988,6 @@ export default function CandidatesPage() {
                     </p>
                   </div>
 
-                  {/* Delete — only when unlocked */}
                   {!isLocked && (
                     <button
                       type="button"
@@ -1025,7 +1000,6 @@ export default function CandidatesPage() {
                   )}
                 </div>
 
-                {/* Candidates grid */}
                 <div className="p-4">
                   <div className="grid grid-cols-3 gap-3 mb-3">
                     {position.candidates.map((candidate) => (
@@ -1037,7 +1011,6 @@ export default function CandidatesPage() {
                           border: "1px solid rgba(255,255,255,0.08)",
                         }}
                       >
-                        {/* Photo */}
                         <div
                           className="w-full overflow-hidden"
                           style={{
@@ -1062,7 +1035,6 @@ export default function CandidatesPage() {
                           )}
                         </div>
 
-                        {/* Name */}
                         <div
                           className="px-2 py-2.5"
                           style={{
@@ -1077,10 +1049,8 @@ export default function CandidatesPage() {
                           </p>
                         </div>
 
-                        {/* Hover actions — only when unlocked */}
                         {!isLocked && (
                           <>
-                            {/* Edit button */}
                             <button
                               type="button"
                               onClick={() =>
@@ -1098,7 +1068,6 @@ export default function CandidatesPage() {
                               />
                             </button>
 
-                            {/* Delete button */}
                             <button
                               type="button"
                               onClick={() =>
@@ -1117,7 +1086,6 @@ export default function CandidatesPage() {
                       </div>
                     ))}
 
-                    {/* Add card — only when unlocked */}
                     {!isLocked && candidateForm.positionId !== position.id && (
                       <button
                         type="button"
@@ -1144,7 +1112,6 @@ export default function CandidatesPage() {
                     )}
                   </div>
 
-                  {/* Add candidate form */}
                   {!isLocked && candidateForm.positionId === position.id && (
                     <div
                       className="rounded-2xl p-4 space-y-3 mt-2"
@@ -1160,7 +1127,6 @@ export default function CandidatesPage() {
                         New Candidate — {position.name}
                       </p>
 
-                      {/* Photo */}
                       <div className="flex items-center gap-3">
                         {candidateForm.photo_preview ? (
                           <div className="relative shrink-0">
@@ -1235,7 +1201,7 @@ export default function CandidatesPage() {
                             className="text-xs mt-0.5"
                             style={{ color: "rgba(255,255,255,0.3)" }}
                           >
-                            JPG, PNG, WebP · Max 2MB
+                            JPG, PNG, WebP · Auto-compressed
                           </p>
                         </div>
                       </div>
@@ -1319,7 +1285,6 @@ export default function CandidatesPage() {
             ))}
           </div>
 
-          {/* Add position — only when unlocked */}
           {!isLocked &&
             (showPositionForm ? (
               <div
@@ -1449,7 +1414,6 @@ export default function CandidatesPage() {
         </div>
       </div>
 
-      {/* Footer */}
       <div
         className="w-full px-6 py-4 flex items-center justify-between"
         style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}

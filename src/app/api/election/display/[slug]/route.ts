@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/db/server";
 
-interface Candidate {
-  id: string;
-  full_name: string;
-  photo_url: string | null;
-  votes: { id: string }[];
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
@@ -38,101 +31,19 @@ export async function GET(
     );
   }
 
-  // Run all queries in parallel
-  const [totalRes, votedRes, positionsRes, voteCountsRes] = await Promise.all([
-    supabaseServer
-      .from("voter_eligibility")
-      .select("id", { count: "exact", head: true })
-      .eq("election_id", election.id),
+  // Call the database function that does all the heavy lifting
+  const { data: result, error } = await supabaseServer.rpc(
+    "get_display_results",
+    { election_id_param: election.id },
+  );
 
-    supabaseServer
-      .from("voter_eligibility")
-      .select("id", { count: "exact", head: true })
-      .eq("election_id", election.id)
-      .eq("has_voted", true),
-
-    supabaseServer
-      .from("positions")
-      .select(
-        `
-        id, name, sort_order,
-        candidates (
-          id, full_name, photo_url
-        )
-      `,
-      )
-      .eq("election_id", election.id)
-      .order("sort_order"),
-
-    // NEW: Get vote counts directly from votes table
-    supabaseServer
-      .from("votes")
-      .select("candidate_id")
-      .eq("election_id", election.id),
-  ]);
-
-  const total = totalRes.count || 0;
-  const voted = votedRes.count || 0;
-
-  // Build vote count map
-  const voteCounts: Record<string, number> = {};
-  (voteCountsRes.data || []).forEach((vote: { candidate_id: string }) => {
-    voteCounts[vote.candidate_id] = (voteCounts[vote.candidate_id] || 0) + 1;
-  });
-
-  // Build results
-  const positions = (positionsRes.data || []).map((position) => {
-    const candidatesWithCounts = position.candidates.map(
-      (candidate: {
-        id: string;
-        full_name: string;
-        photo_url: string | null;
-      }) => ({
-        id: candidate.id,
-        full_name: candidate.full_name,
-        photo_url: candidate.photo_url,
-        vote_count: voteCounts[candidate.id] || 0,
-      }),
+  if (error || !result) {
+    console.error("RPC error:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch results" },
+      { status: 500 },
     );
+  }
 
-    const totalPositionVotes = candidatesWithCounts.reduce(
-      (sum, c) => sum + c.vote_count,
-      0,
-    );
-
-    const maxVotes = Math.max(
-      ...candidatesWithCounts.map((c) => c.vote_count),
-      0,
-    );
-
-    return {
-      id: position.id,
-      name: position.name,
-      total_votes: totalPositionVotes,
-      candidates: candidatesWithCounts.map((c) => ({
-        ...c,
-        percentage:
-          totalPositionVotes > 0
-            ? Math.round((c.vote_count / totalPositionVotes) * 100)
-            : 0,
-        is_leading: c.vote_count === maxVotes && maxVotes > 0,
-      })),
-    };
-  });
-
-  return NextResponse.json({
-    election: {
-      title: election.title,
-      status: election.status,
-      start_time: election.start_time,
-      end_time: election.end_time,
-    },
-    stats: {
-      total_voters: total,
-      has_voted: voted,
-      turnout_percent: total > 0 ? Math.round((voted / total) * 100) : 0,
-      remaining: total - voted,
-    },
-    positions,
-  });
+  return NextResponse.json(result);
 }

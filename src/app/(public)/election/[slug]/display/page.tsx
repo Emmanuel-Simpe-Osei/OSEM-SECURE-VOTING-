@@ -81,6 +81,22 @@ export default function ElectionDisplayPage() {
       const res = await fetch(`/api/election/display/${slug}`);
       if (!res.ok) return;
       const json = await res.json();
+
+      // Remove duplicate positions by ID
+      if (json.positions && Array.isArray(json.positions)) {
+        const seenIds = new Set();
+        const uniquePositions = [];
+
+        for (const position of json.positions) {
+          if (!seenIds.has(position.id)) {
+            seenIds.add(position.id);
+            uniquePositions.push(position);
+          }
+        }
+
+        json.positions = uniquePositions;
+      }
+
       setData(json);
     } catch {
     } finally {

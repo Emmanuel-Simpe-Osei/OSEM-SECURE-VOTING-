@@ -103,6 +103,11 @@ export default function ElectionDetailPage() {
   const [duplicating, setDuplicating] = useState(false);
   const [duplicateError, setDuplicateError] = useState("");
 
+  // Extend election state
+  const [showExtend, setShowExtend] = useState(false);
+  const [extendMinutes, setExtendMinutes] = useState(30);
+  const [extending, setExtending] = useState(false);
+
   // Eligibility check state
   const [eligibilityEnabled, setEligibilityEnabled] = useState(false);
   const [eligibilityOpenFrom, setEligibilityOpenFrom] = useState("");
@@ -191,6 +196,31 @@ export default function ElectionDetailPage() {
       setError("Network error. Please try again.");
     } finally {
       setActionLoading("");
+    }
+  }
+
+  async function extendElection() {
+    setExtending(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/elections/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extend_minutes: extendMinutes }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to extend election.");
+        return;
+      }
+      setElection((prev) =>
+        prev ? { ...prev, end_time: data.new_end_time } : prev,
+      );
+      setShowExtend(false);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setExtending(false);
     }
   }
 
@@ -446,12 +476,10 @@ export default function ElectionDetailPage() {
                 />
               </button>
             </div>
-
             <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
               Creates a new draft with the same positions and candidates. Voter
               list is not copied.
             </p>
-
             {duplicateError && (
               <div
                 className="rounded-2xl p-3 flex items-start gap-2"
@@ -469,9 +497,7 @@ export default function ElectionDetailPage() {
                 </p>
               </div>
             )}
-
             <div className="space-y-3">
-              {/* Title */}
               <div>
                 <label
                   className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -501,8 +527,6 @@ export default function ElectionDetailPage() {
                   autoFocus
                 />
               </div>
-
-              {/* Slug */}
               <div>
                 <label
                   className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -526,8 +550,6 @@ export default function ElectionDetailPage() {
                   }}
                 />
               </div>
-
-              {/* Start time */}
               <div>
                 <label
                   className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -548,8 +570,6 @@ export default function ElectionDetailPage() {
                   }}
                 />
               </div>
-
-              {/* End time */}
               <div>
                 <label
                   className="block text-xs font-bold mb-1.5 uppercase tracking-wide"
@@ -571,7 +591,6 @@ export default function ElectionDetailPage() {
                 />
               </div>
             </div>
-
             <div className="flex gap-3">
               <button
                 onClick={() => setShowDuplicate(false)}
@@ -695,6 +714,69 @@ export default function ElectionDetailPage() {
               {" → "}
               {formatTime(election.end_time)}
             </p>
+
+            {/* Extend time button */}
+            {["active", "scheduled", "paused"].includes(election.status) && (
+              <div className="mt-2">
+                {!showExtend ? (
+                  <button
+                    onClick={() => setShowExtend(true)}
+                    className="text-xs font-bold px-3 py-1.5 rounded-xl transition-all active:scale-95"
+                    style={{
+                      background: "rgba(249,168,37,0.15)",
+                      color: "#F9A825",
+                      border: "1px solid rgba(249,168,37,0.3)",
+                    }}
+                  >
+                    + Extend Time
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 flex-wrap mt-1">
+                    <select
+                      value={extendMinutes}
+                      onChange={(e) =>
+                        setExtendMinutes(parseInt(e.target.value))
+                      }
+                      className="px-3 py-1.5 rounded-xl text-xs outline-none"
+                      style={{
+                        background: "rgba(255,255,255,0.07)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        color: "#ffffff",
+                        colorScheme: "dark",
+                      }}
+                    >
+                      {[15, 30, 45, 60, 90, 120, 180, 240].map((m) => (
+                        <option key={m} value={m}>
+                          +{m} minutes
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={extendElection}
+                      disabled={extending}
+                      className="text-xs font-bold px-3 py-1.5 rounded-xl transition-all active:scale-95 disabled:opacity-50"
+                      style={{
+                        background: "linear-gradient(135deg, #F9A825, #E65100)",
+                        color: "#0B1E35",
+                      }}
+                    >
+                      {extending ? "Extending..." : "Confirm"}
+                    </button>
+                    <button
+                      onClick={() => setShowExtend(false)}
+                      className="text-xs font-bold px-3 py-1.5 rounded-xl transition-all active:scale-95"
+                      style={{
+                        background: "rgba(255,255,255,0.05)",
+                        color: "rgba(255,255,255,0.5)",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {election.description && (
               <p
                 className="text-sm mt-2"
@@ -970,8 +1052,6 @@ export default function ElectionDetailPage() {
                   Add candidates and voters before opening voting.
                 </p>
               )}
-
-              {/* Duplicate */}
               <button
                 onClick={openDuplicateModal}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
@@ -1300,7 +1380,6 @@ export default function ElectionDetailPage() {
                 />
               </button>
             </div>
-
             {sessionVerification && (
               <div className="mt-2 space-y-3">
                 <div>
@@ -1354,7 +1433,6 @@ export default function ElectionDetailPage() {
                 </div>
               </div>
             )}
-
             <button
               onClick={saveSessionVerification}
               disabled={savingSession}
@@ -1430,7 +1508,6 @@ export default function ElectionDetailPage() {
                 />
               </button>
             </div>
-
             {eligibilityEnabled && (
               <div className="mt-2 space-y-4">
                 <div>
@@ -1460,7 +1537,6 @@ export default function ElectionDetailPage() {
                     election goes active.
                   </p>
                 </div>
-
                 {eligibilityStats && eligibilityStats.total > 0 && (
                   <div
                     className="rounded-2xl p-4"
@@ -1511,7 +1587,6 @@ export default function ElectionDetailPage() {
                     </div>
                   </div>
                 )}
-
                 <div>
                   <p
                     className="text-xs font-bold mb-2 uppercase tracking-wide"
@@ -1562,7 +1637,6 @@ export default function ElectionDetailPage() {
                 </div>
               </div>
             )}
-
             <button
               onClick={saveEligibilityCheck}
               disabled={savingEligibility}

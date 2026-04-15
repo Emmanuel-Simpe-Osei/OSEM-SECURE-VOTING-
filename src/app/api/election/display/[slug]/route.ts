@@ -25,8 +25,6 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Only show display for active or paused elections
-  // OR if results are public after close
   const canShowResults =
     election.status === "active" ||
     election.status === "paused" ||
@@ -41,7 +39,7 @@ export async function GET(
   }
 
   // Run all queries in parallel
-  const [totalRes, votedRes, positionsRes] = await Promise.all([
+  const [totalRes, votedRes, positionsRes, voteCountsRes] = await Promise.all([
     supabaseServer
       .from("voter_eligibility")
       .select("id", { count: "exact", head: true })
@@ -59,26 +57,41 @@ export async function GET(
         `
         id, name, sort_order,
         candidates (
-          id, full_name, photo_url,
-          votes (id)
+          id, full_name, photo_url
         )
       `,
       )
       .eq("election_id", election.id)
       .order("sort_order"),
+
+    // NEW: Get vote counts directly from votes table
+    supabaseServer
+      .from("votes")
+      .select("candidate_id")
+      .eq("election_id", election.id),
   ]);
 
   const total = totalRes.count || 0;
   const voted = votedRes.count || 0;
 
+  // Build vote count map
+  const voteCounts: Record<string, number> = {};
+  (voteCountsRes.data || []).forEach((vote: { candidate_id: string }) => {
+    voteCounts[vote.candidate_id] = (voteCounts[vote.candidate_id] || 0) + 1;
+  });
+
   // Build results
   const positions = (positionsRes.data || []).map((position) => {
     const candidatesWithCounts = position.candidates.map(
-      (candidate: Candidate) => ({
+      (candidate: {
+        id: string;
+        full_name: string;
+        photo_url: string | null;
+      }) => ({
         id: candidate.id,
         full_name: candidate.full_name,
         photo_url: candidate.photo_url,
-        vote_count: candidate.votes?.length || 0,
+        vote_count: voteCounts[candidate.id] || 0,
       }),
     );
 

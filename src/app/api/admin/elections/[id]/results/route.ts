@@ -2,20 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { supabaseServer } from "@/lib/db/server";
 
-interface Candidate {
-  id: string;
-  full_name: string;
-  photo_url: string | null;
-  votes: { id: string }[];
-}
-
-interface CandidateWithCount {
-  id: string;
-  full_name: string;
-  photo_url: string | null;
-  vote_count: number;
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -27,113 +13,94 @@ export async function GET(
 
   const { id } = await params;
 
-  const [electionRes, totalRes, votedRes, positionsRes, submissionsRes] =
-    await Promise.all([
-      supabaseServer
-        .from("elections")
-        .select(
-          "id, title, status, results_visibility, start_time, end_time, updated_at",
-        )
-        .eq("id", id)
-        .single(),
+  // Get election details
+  const { data: election } = await supabaseServer
+    .from("elections")
+    .select(
+      "id, title, status, results_visibility, start_time, end_time, updated_at",
+    )
+    .eq("id", id)
+    .single();
 
-      supabaseServer
-        .from("voter_eligibility")
-        .select("id", { count: "exact", head: true })
-        .eq("election_id", id),
-
-      supabaseServer
-        .from("voter_eligibility")
-        .select("id", { count: "exact", head: true })
-        .eq("election_id", id)
-        .eq("has_voted", true),
-
-      supabaseServer
-        .from("positions")
-        .select(
-          `
-        id, name, max_votes, sort_order,
-        candidates (
-          id, full_name, photo_url,
-          votes (id)
-        )
-      `,
-        )
-        .eq("election_id", id)
-        .order("sort_order"),
-
-      supabaseServer
-        .from("ballot_submissions")
-        .select("id", { count: "exact", head: true })
-        .eq("election_id", id),
-    ]);
-
-  if (!electionRes.data) {
+  if (!election) {
     return NextResponse.json({ error: "Election not found." }, { status: 404 });
   }
 
-  const total = totalRes.count || 0;
-  const voted = votedRes.count || 0;
-  const totalBallots = submissionsRes.count || 0;
+  // Get ballot count
+  const { count: totalBallots } = await supabaseServer
+    .from("ballot_submissions")
+    .select("id", { count: "exact", head: true })
+    .eq("election_id", id);
 
-  const positions = (positionsRes.data || []).map((position) => {
-    const candidatesWithCounts: CandidateWithCount[] = position.candidates.map(
-      (candidate: Candidate) => ({
-        id: candidate.id,
-        full_name: candidate.full_name,
-        photo_url: candidate.photo_url,
-        vote_count: candidate.votes?.length || 0,
-      }),
+  // Call the SAME function that works for display
+  const { data: displayData, error: rpcError } = await supabaseServer.rpc(
+    "get_display_results",
+    { election_id_param: id },
+  );
+
+  if (rpcError || !displayData) {
+    console.error("RPC error:", rpcError);
+    return NextResponse.json(
+      { error: "Failed to fetch results" },
+      { status: 500 },
     );
+  }
 
-    const totalPositionVotes = candidatesWithCounts.reduce(
-      (sum, c) => sum + c.vote_count,
-      0,
-    );
+  // Transform display data to match results API format
+  const stats = displayData.stats as any;
+  const positions = ((displayData.positions as any[]) || []).map(
+    (position: any) => {
+      const candidates = position.candidates.map((c: any) => {
+        const maxVotes = Math.max(
+          ...position.candidates.map((cand: any) => cand.vote_count),
+          0,
+        );
+        const winnersCount = position.candidates.filter(
+          (cand: any) => cand.vote_count === maxVotes && maxVotes > 0,
+        ).length;
+        const hasTie = winnersCount > 1;
 
-    const maxVotes = Math.max(
-      ...candidatesWithCounts.map((c) => c.vote_count),
-      0,
-    );
+        return {
+          id: c.id,
+          full_name: c.full_name,
+          photo_url: c.photo_url,
+          vote_count: c.vote_count,
+          percentage: c.percentage,
+          is_winner: c.is_leading,
+          is_tie: hasTie && c.is_leading,
+        };
+      });
 
-    const winnersCount = candidatesWithCounts.filter(
-      (c) => c.vote_count === maxVotes && maxVotes > 0,
-    ).length;
-    const hasTie = winnersCount > 1;
+      const maxVotes = Math.max(...candidates.map((c: any) => c.vote_count), 0);
+      const winnersCount = candidates.filter(
+        (c: any) => c.vote_count === maxVotes && maxVotes > 0,
+      ).length;
+      const hasTie = winnersCount > 1;
 
-    const candidates = candidatesWithCounts.map((c) => ({
-      ...c,
-      percentage:
-        totalPositionVotes > 0
-          ? Math.round((c.vote_count / totalPositionVotes) * 100)
-          : 0,
-      is_winner: c.vote_count === maxVotes && maxVotes > 0,
-      is_tie: hasTie && c.vote_count === maxVotes,
-    }));
-
-    return {
-      id: position.id,
-      name: position.name,
-      max_votes: position.max_votes,
-      total_votes: totalPositionVotes,
-      has_tie: hasTie,
-      candidates,
-    };
-  });
+      return {
+        id: position.id,
+        name: position.name,
+        max_votes: 1, // Default since display doesn't track max_votes per position
+        total_votes: position.total_votes,
+        has_tie: hasTie,
+        candidates,
+      };
+    },
+  );
 
   return NextResponse.json({
-    election: electionRes.data,
+    election,
     stats: {
-      total_voters: total,
-      has_voted: voted,
-      turnout_percent: total > 0 ? Math.round((voted / total) * 100) : 0,
-      total_ballots: totalBallots,
-      valid_votes: totalBallots,
+      total_voters: stats.total_voters,
+      has_voted: stats.has_voted,
+      turnout_percent: stats.turnout_percent,
+      total_ballots: totalBallots || 0,
+      valid_votes: totalBallots || 0,
       rejected_votes: 0,
     },
     published_at:
-      electionRes.data.results_visibility === "public_after_close"
-        ? electionRes.data.updated_at
+      election.results_visibility === "public_after_close"
+        ? election.updated_at
         : null,
     positions,
   });

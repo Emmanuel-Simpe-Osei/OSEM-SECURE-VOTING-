@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ShieldCheck,
   ArrowLeft,
-  BarChart3,
   Trophy,
   CheckCircle2,
   Loader2,
@@ -58,6 +57,22 @@ interface ResultsData {
   published_at: string | null;
   positions: PositionResult[];
 }
+
+// Priority order for positions - President first
+const POSITION_PRIORITY: Record<string, number> = {
+  PRESIDENT: 1,
+  "VICE PRESIDENT": 2,
+  "GENERAL SECRETARY": 3,
+  "ABAS GENERAL SECRETARY": 3,
+  "FINANCIAL SECRETARY": 4,
+  TREASURER: 5,
+  "ORGANIZING SECRETARY": 6,
+  "WOMEN'S COMMISSIONER": 7,
+  "ABAS WOMEN'S COMMISSIONER": 7,
+  "PROJECT AND PROGRAM COORDINATOR": 8,
+  AUDITOR: 9,
+  "PUBLIC RELATIONS OFFICER": 10,
+};
 
 function useNetwork() {
   const [online, setOnline] = useState(() => navigator.onLine);
@@ -140,6 +155,18 @@ export default function AdminResultsPage() {
     });
   }
 
+  // Sort positions by priority, then alphabetically
+  function sortPositions(positions: PositionResult[]): PositionResult[] {
+    return [...positions].sort((a, b) => {
+      const priorityA = POSITION_PRIORITY[a.name.toUpperCase()] || 999;
+      const priorityB = POSITION_PRIORITY[b.name.toUpperCase()] || 999;
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }
+
   if (loading) {
     return (
       <div
@@ -161,6 +188,8 @@ export default function AdminResultsPage() {
       </div>
     );
   }
+
+  const sortedPositions = data ? sortPositions(data.positions) : [];
 
   return (
     <div
@@ -193,12 +222,12 @@ export default function AdminResultsPage() {
             border: 2px solid #D97706 !important;
           }
           .winner-glow { animation: none !important; }
-          h1, h2, h3 { color: #111111 !important; }
+          h1, h2, h3 { color: #111827 !important; }
           p, span { color: #374151 !important; }
           .print-gold { color: #B8860B !important; }
           .print-green { color: #16A34A !important; }
           .print-red { color: #DC2626 !important; }
-          .print-muted { color: #6B7280 !important; }
+          .print-muted { color: #4B5563 !important; }
           .print-bar-track { background: #E5E7EB !important; }
           .print-bar-winner { background: #D97706 !important; }
           .print-bar-normal { background: #9CA3AF !important; }
@@ -230,7 +259,7 @@ export default function AdminResultsPage() {
         <button
           onClick={() => router.push(`/admin/elections/${id}`)}
           className="flex items-center gap-2 text-xs font-medium transition-opacity hover:opacity-60"
-          style={{ color: "rgba(255,255,255,0.5)" }}
+          style={{ color: "rgba(255,255,255,0.6)" }}
         >
           <ArrowLeft className="w-4 h-4" />
           Back
@@ -240,9 +269,9 @@ export default function AdminResultsPage() {
             onClick={() => window.print()}
             className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
             style={{
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.6)",
-              border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.9)",
+              border: "1px solid rgba(255,255,255,0.15)",
             }}
           >
             <Printer className="w-3.5 h-3.5" />
@@ -266,7 +295,7 @@ export default function AdminResultsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-4 py-8">
+        <div className="max-w-3xl mx-auto px-4 py-8">
           <div
             className="mb-6"
             style={{
@@ -278,10 +307,7 @@ export default function AdminResultsPage() {
             <h1 className="text-2xl font-bold text-white mb-1">
               Election Results
             </h1>
-            <p
-              className="text-sm print-muted"
-              style={{ color: "rgba(255,255,255,0.4)" }}
-            >
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
               {data?.election.title}
             </p>
           </div>
@@ -311,13 +337,10 @@ export default function AdminResultsPage() {
             }}
           >
             <div className="flex items-center gap-2 mb-3">
-              <Clock
-                className="w-4 h-4 print-gold"
-                style={{ color: "#F9A825" }}
-              />
+              <Clock className="w-4 h-4" style={{ color: "#F9A825" }} />
               <p
-                className="text-xs font-bold uppercase tracking-wide print-muted"
-                style={{ color: "rgba(255,255,255,0.5)" }}
+                className="text-xs font-bold uppercase tracking-wide"
+                style={{ color: "rgba(255,255,255,0.7)" }}
               >
                 Election Period
               </p>
@@ -325,23 +348,23 @@ export default function AdminResultsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p
-                  className="text-xs mb-1 print-muted"
-                  style={{ color: "rgba(255,255,255,0.3)" }}
+                  className="text-xs mb-1"
+                  style={{ color: "rgba(255,255,255,0.5)" }}
                 >
                   Started
                 </p>
-                <p className="text-xs font-bold text-white">
+                <p className="text-sm font-bold text-white">
                   {data ? formatDateTime(data.election.start_time) : "—"}
                 </p>
               </div>
               <div>
                 <p
-                  className="text-xs mb-1 print-muted"
-                  style={{ color: "rgba(255,255,255,0.3)" }}
+                  className="text-xs mb-1"
+                  style={{ color: "rgba(255,255,255,0.5)" }}
                 >
                   Ended
                 </p>
-                <p className="text-xs font-bold text-white">
+                <p className="text-sm font-bold text-white">
                   {data ? formatDateTime(data.election.end_time) : "—"}
                 </p>
               </div>
@@ -365,21 +388,18 @@ export default function AdminResultsPage() {
               }}
             >
               <p
-                className="text-xs font-bold uppercase tracking-wide mb-3 print-muted"
-                style={{ color: "rgba(255,255,255,0.4)" }}
+                className="text-xs font-bold uppercase tracking-wide mb-3"
+                style={{ color: "rgba(255,255,255,0.6)" }}
               >
                 Voter Turnout
               </p>
               <p
-                className="text-2xl font-black mb-0.5 print-gold"
+                className="text-2xl font-black mb-0.5"
                 style={{ color: "#F9A825" }}
               >
                 {data?.stats.turnout_percent}%
               </p>
-              <p
-                className="text-xs print-muted"
-                style={{ color: "rgba(255,255,255,0.4)" }}
-              >
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.6)" }}>
                 {data?.stats.has_voted.toLocaleString()} /{" "}
                 {data?.stats.total_voters.toLocaleString()} voters
               </p>
@@ -393,45 +413,36 @@ export default function AdminResultsPage() {
               }}
             >
               <p
-                className="text-xs font-bold uppercase tracking-wide mb-3 print-muted"
-                style={{ color: "rgba(255,255,255,0.4)" }}
+                className="text-xs font-bold uppercase tracking-wide mb-3"
+                style={{ color: "rgba(255,255,255,0.6)" }}
               >
                 Ballot Summary
               </p>
               <div className="space-y-1.5">
                 <div className="flex justify-between">
                   <p
-                    className="text-xs print-muted"
-                    style={{ color: "rgba(255,255,255,0.4)" }}
+                    className="text-xs"
+                    style={{ color: "rgba(255,255,255,0.6)" }}
                   >
                     Total Ballots
                   </p>
-                  <p className="text-xs font-bold text-white">
+                  <p className="text-sm font-bold text-white">
                     {data?.stats.total_ballots.toLocaleString()}
                   </p>
                 </div>
                 <div className="flex justify-between">
-                  <p
-                    className="text-xs print-green"
-                    style={{ color: "#4ADE80" }}
-                  >
+                  <p className="text-xs" style={{ color: "#4ADE80" }}>
                     Valid Votes
                   </p>
-                  <p
-                    className="text-xs font-bold print-green"
-                    style={{ color: "#4ADE80" }}
-                  >
+                  <p className="text-sm font-bold" style={{ color: "#4ADE80" }}>
                     {data?.stats.valid_votes.toLocaleString()}
                   </p>
                 </div>
                 <div className="flex justify-between">
-                  <p className="text-xs print-red" style={{ color: "#F87171" }}>
+                  <p className="text-xs" style={{ color: "#F87171" }}>
                     Rejected Votes
                   </p>
-                  <p
-                    className="text-xs font-bold print-red"
-                    style={{ color: "#F87171" }}
-                  >
+                  <p className="text-sm font-bold" style={{ color: "#F87171" }}>
                     {data?.stats.rejected_votes.toLocaleString()}
                   </p>
                 </div>
@@ -448,19 +459,16 @@ export default function AdminResultsPage() {
             }}
           >
             <CheckCircle2
-              className="w-5 h-5 shrink-0 print-green"
+              className="w-5 h-5 shrink-0"
               style={{ color: "#4ADE80" }}
             />
             <div>
-              <p
-                className="text-xs font-bold print-green"
-                style={{ color: "#4ADE80" }}
-              >
+              <p className="text-xs font-bold" style={{ color: "#4ADE80" }}>
                 Audit Complete · No Anomalies Detected
               </p>
               <p
-                className="text-xs mt-0.5 print-muted"
-                style={{ color: "rgba(255,255,255,0.3)" }}
+                className="text-xs mt-0.5"
+                style={{ color: "rgba(255,255,255,0.5)" }}
               >
                 All ballots validated · Double voting prevention confirmed ·
                 Audit log intact
@@ -468,7 +476,7 @@ export default function AdminResultsPage() {
             </div>
           </div>
 
-          {/* Publish banner — hidden when printing */}
+          {/* Publish banner */}
           <div
             className="rounded-2xl p-5 mb-8 no-print"
             style={{
@@ -504,7 +512,7 @@ export default function AdminResultsPage() {
                 </p>
                 <p
                   className="text-xs mt-0.5"
-                  style={{ color: "rgba(255,255,255,0.4)" }}
+                  style={{ color: "rgba(255,255,255,0.6)" }}
                 >
                   {published
                     ? `Published ${data?.published_at ? formatDateTime(data.published_at) : ""}`
@@ -532,183 +540,191 @@ export default function AdminResultsPage() {
             </div>
           </div>
 
-          {/* Position results */}
+          {/* Position results - SORTED */}
           <div className="space-y-6">
-            {data?.positions.map((position, posIdx) => (
-              <div
-                key={position.id}
-                style={{
-                  opacity: mounted ? 1 : 0,
-                  transform: mounted ? "translateY(0)" : "translateY(12px)",
-                  transition: `all 0.4s ease ${0.2 + posIdx * 0.1}s`,
-                }}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-lg font-bold text-white">
-                      {position.name}
-                    </h2>
-                    <p
-                      className="text-xs mt-0.5 print-muted"
-                      style={{ color: "rgba(255,255,255,0.4)" }}
-                    >
-                      Total votes: {position.total_votes.toLocaleString()}
-                    </p>
-                  </div>
-                  {position.has_tie && (
-                    <div
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-                      style={{
-                        background: "rgba(249,168,37,0.15)",
-                        border: "1px solid rgba(249,168,37,0.4)",
-                      }}
-                    >
-                      <AlertTriangle
-                        className="w-3.5 h-3.5 print-gold"
-                        style={{ color: "#F9A825" }}
-                      />
-                      <span
-                        className="text-xs font-bold print-gold"
-                        style={{ color: "#F9A825" }}
-                      >
-                        TIE — Runoff Required
-                      </span>
-                    </div>
-                  )}
-                </div>
+            {sortedPositions.map((position, posIdx) => {
+              // Determine the actual winner (only one, even if tie)
+              const sortedCandidates = [...position.candidates].sort(
+                (a, b) => b.vote_count - a.vote_count,
+              );
+              const maxVotes = sortedCandidates[0]?.vote_count || 0;
 
-                <div className="space-y-3">
-                  {position.candidates
-                    .sort((a, b) => b.vote_count - a.vote_count)
-                    .map((candidate, idx) => (
+              return (
+                <div
+                  key={position.id}
+                  style={{
+                    opacity: mounted ? 1 : 0,
+                    transform: mounted ? "translateY(0)" : "translateY(12px)",
+                    transition: `all 0.4s ease ${0.2 + posIdx * 0.1}s`,
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-white">
+                        {position.name}
+                      </h2>
+                      <p
+                        className="text-xs mt-0.5"
+                        style={{ color: "rgba(255,255,255,0.6)" }}
+                      >
+                        Total votes: {position.total_votes.toLocaleString()}
+                      </p>
+                    </div>
+                    {position.has_tie && (
                       <div
-                        key={candidate.id}
-                        className={`rounded-2xl overflow-hidden ${
-                          candidate.is_winner && !position.has_tie
-                            ? "winner-glow print-winner-section"
-                            : "print-section"
-                        }`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
                         style={{
-                          background:
-                            candidate.is_winner && !position.has_tie
-                              ? "rgba(249,168,37,0.08)"
-                              : "rgba(255,255,255,0.05)",
-                          border:
-                            candidate.is_winner && !position.has_tie
-                              ? "2px solid rgba(249,168,37,0.4)"
-                              : "1px solid rgba(255,255,255,0.08)",
+                          background: "rgba(249,168,37,0.15)",
+                          border: "1px solid rgba(249,168,37,0.4)",
                         }}
                       >
-                        <div className="p-4">
-                          <div className="flex items-center gap-3 mb-3">
-                            <div
-                              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm"
-                              style={{
-                                background:
-                                  idx === 0 && !position.has_tie
+                        <AlertTriangle
+                          className="w-3.5 h-3.5"
+                          style={{ color: "#F9A825" }}
+                        />
+                        <span
+                          className="text-xs font-bold"
+                          style={{ color: "#F9A825" }}
+                        >
+                          TIE — Runoff Required
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    {sortedCandidates.map((candidate, idx) => {
+                      // Only the FIRST candidate (highest votes) is the winner
+                      const isWinner =
+                        idx === 0 &&
+                        candidate.vote_count > 0 &&
+                        !position.has_tie;
+
+                      return (
+                        <div
+                          key={candidate.id}
+                          className={`rounded-2xl overflow-hidden ${
+                            isWinner
+                              ? "winner-glow print-winner-section"
+                              : "print-section"
+                          }`}
+                          style={{
+                            background: isWinner
+                              ? "rgba(249,168,37,0.08)"
+                              : "rgba(255,255,255,0.05)",
+                            border: isWinner
+                              ? "2px solid rgba(249,168,37,0.4)"
+                              : "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <div className="p-4">
+                            <div className="flex items-center gap-3 mb-3">
+                              <div
+                                className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold"
+                                style={{
+                                  background: isWinner
                                     ? "rgba(249,168,37,0.2)"
                                     : "rgba(255,255,255,0.06)",
-                              }}
-                            >
-                              {idx === 0
-                                ? "🥇"
-                                : idx === 1
-                                  ? "🥈"
-                                  : idx === 2
-                                    ? "🥉"
-                                    : idx + 1}
-                            </div>
-                            <div
-                              className="w-10 h-10 rounded-xl overflow-hidden shrink-0"
-                              style={{ background: "rgba(255,255,255,0.07)" }}
-                            >
-                              {candidate.photo_url ? (
-                                <img
-                                  src={candidate.photo_url}
-                                  alt={candidate.full_name}
-                                  className="w-full h-full object-cover object-top"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <Users
-                                    className="w-4 h-4"
-                                    style={{ color: "rgba(255,255,255,0.2)" }}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-bold text-sm text-white truncate">
-                                {candidate.full_name}
-                              </p>
-                              {candidate.is_winner && !position.has_tie && (
-                                <div className="flex items-center gap-1 mt-0.5">
-                                  <Trophy
-                                    className="w-3 h-3 print-gold"
-                                    style={{ color: "#F9A825" }}
-                                  />
-                                  <span
-                                    className="text-xs font-bold print-gold"
-                                    style={{ color: "#F9A825" }}
-                                  >
-                                    Winner
-                                  </span>
-                                </div>
-                              )}
-                              {position.has_tie && candidate.is_winner && (
-                                <div className="flex items-center gap-1 mt-0.5">
-                                  <AlertTriangle
-                                    className="w-3 h-3 print-gold"
-                                    style={{ color: "#F9A825" }}
-                                  />
-                                  <span
-                                    className="text-xs font-bold print-gold"
-                                    style={{ color: "#F9A825" }}
-                                  >
-                                    Tied
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-lg font-bold text-white">
-                                {candidate.vote_count.toLocaleString()}
-                              </p>
-                              <p
-                                className="text-xs print-muted"
-                                style={{ color: "rgba(255,255,255,0.4)" }}
+                                  color: isWinner
+                                    ? "#F9A825"
+                                    : "rgba(255,255,255,0.5)",
+                                }}
                               >
-                                {candidate.percentage}%
-                              </p>
+                                {idx + 1}
+                              </div>
+                              <div
+                                className="w-10 h-10 rounded-xl overflow-hidden shrink-0"
+                                style={{ background: "rgba(255,255,255,0.07)" }}
+                              >
+                                {candidate.photo_url ? (
+                                  <img
+                                    src={candidate.photo_url}
+                                    alt={candidate.full_name}
+                                    className="w-full h-full object-cover object-top"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <Users
+                                      className="w-4 h-4"
+                                      style={{ color: "rgba(255,255,255,0.3)" }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-sm text-white truncate">
+                                  {candidate.full_name}
+                                </p>
+                                {isWinner && (
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <Trophy
+                                      className="w-3 h-3"
+                                      style={{ color: "#F9A825" }}
+                                    />
+                                    <span
+                                      className="text-xs font-bold"
+                                      style={{ color: "#F9A825" }}
+                                    >
+                                      Winner
+                                    </span>
+                                  </div>
+                                )}
+                                {position.has_tie &&
+                                  candidate.vote_count === maxVotes && (
+                                    <div className="flex items-center gap-1 mt-0.5">
+                                      <AlertTriangle
+                                        className="w-3 h-3"
+                                        style={{ color: "#F9A825" }}
+                                      />
+                                      <span
+                                        className="text-xs font-bold"
+                                        style={{ color: "#F9A825" }}
+                                      >
+                                        Tied
+                                      </span>
+                                    </div>
+                                  )}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="text-lg font-bold text-white">
+                                  {candidate.vote_count.toLocaleString()}
+                                </p>
+                                <p
+                                  className="text-xs font-medium"
+                                  style={{ color: "rgba(255,255,255,0.6)" }}
+                                >
+                                  {candidate.percentage}%
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                          <div
-                            className="w-full h-2 rounded-full overflow-hidden print-bar-track"
-                            style={{ background: "rgba(255,255,255,0.08)" }}
-                          >
                             <div
-                              className={`h-2 rounded-full transition-all duration-1000 ${
-                                candidate.is_winner && !position.has_tie
-                                  ? "print-bar-winner"
-                                  : "print-bar-normal"
-                              }`}
-                              style={{
-                                width: mounted
-                                  ? `${candidate.percentage}%`
-                                  : "0%",
-                                background:
-                                  candidate.is_winner && !position.has_tie
+                              className="w-full h-2 rounded-full overflow-hidden"
+                              style={{ background: "rgba(255,255,255,0.08)" }}
+                            >
+                              <div
+                                className={`h-2 rounded-full transition-all duration-1000 ${
+                                  isWinner
+                                    ? "print-bar-winner"
+                                    : "print-bar-normal"
+                                }`}
+                                style={{
+                                  width: mounted
+                                    ? `${candidate.percentage}%`
+                                    : "0%",
+                                  background: isWinner
                                     ? "linear-gradient(90deg, #F9A825, #FFD54F)"
-                                    : "rgba(255,255,255,0.2)",
-                              }}
-                            />
+                                    : "rgba(255,255,255,0.25)",
+                                }}
+                              />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Print disclaimer */}
@@ -720,14 +736,14 @@ export default function AdminResultsPage() {
             }}
           >
             <p
-              className="text-xs font-bold mb-2 print-muted"
-              style={{ color: "rgba(255,255,255,0.4)" }}
+              className="text-xs font-bold mb-2"
+              style={{ color: "rgba(255,255,255,0.7)" }}
             >
               OFFICIAL DISCLAIMER
             </p>
             <p
-              className="text-xs leading-relaxed print-muted"
-              style={{ color: "rgba(255,255,255,0.3)" }}
+              className="text-xs leading-relaxed"
+              style={{ color: "rgba(255,255,255,0.6)" }}
             >
               These results are final and certified by the OSEM Secure Vote
               electoral management system. All votes were cast electronically
@@ -748,15 +764,15 @@ export default function AdminResultsPage() {
             className="w-1.5 h-1.5 rounded-full"
             style={{ background: online ? "#16A34A" : "#DC2626" }}
           />
-          <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+          <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
             {online ? "Connection secure" : "No connection"}
           </p>
         </div>
-        <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+        <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
           Powered by{" "}
           <span
             className="font-semibold"
-            style={{ color: "rgba(255,255,255,0.5)" }}
+            style={{ color: "rgba(255,255,255,0.7)" }}
           >
             OSEM Technologies
           </span>
